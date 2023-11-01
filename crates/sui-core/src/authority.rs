@@ -1483,9 +1483,13 @@ impl AuthorityState {
         let silent = true;
         // don't bother with paranoid checks in dry run
         let enable_move_vm_paranoid_checks = false;
-        let executor =
-            sui_execution::executor(protocol_config, enable_move_vm_paranoid_checks, silent)
-                .expect("Creating an executor should not fail here");
+        let executor = sui_execution::executor(
+            protocol_config,
+            enable_move_vm_paranoid_checks,
+            silent,
+            None,
+        )
+        .expect("Creating an executor should not fail here");
 
         let expensive_checks = false;
         let (inner_temp_store, effects, _execution_error) = executor
@@ -1643,6 +1647,7 @@ impl AuthorityState {
             self.expensive_safety_check_config
                 .enable_move_vm_paranoid_checks(),
             silent,
+            None,
         )
         .expect("Creating an executor should not fail here");
         let expensive_checks = false;
