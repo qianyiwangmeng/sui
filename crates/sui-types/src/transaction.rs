@@ -2970,6 +2970,12 @@ impl From<Object> for ReceivingObjectReadResultKind {
     }
 }
 
+impl From<Arc<Object>> for ReceivingObjectReadResultKind {
+    fn from(object: Arc<Object>) -> Self {
+        Self::Object(object)
+    }
+}
+
 pub struct ReceivingObjects {
     pub objects: Vec<ReceivingObjectReadResult>,
 }
