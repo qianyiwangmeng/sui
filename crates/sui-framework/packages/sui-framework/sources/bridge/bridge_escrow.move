@@ -1,7 +1,8 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-module sui_bridge::escrow {
+// Escrow package for locking unburnable tokens/objects
+module sui::bridge_escrow {
     use std::type_name::{Self, TypeName};
 
     use sui::balance::{Self, Balance};
@@ -10,12 +11,13 @@ module sui_bridge::escrow {
     use sui::object::{Self, UID, ID};
     use sui::tx_context::TxContext;
 
-    friend sui_bridge::bridge;
+    friend sui::bridge;
 
     struct BridgeEscrow has store {
         id: UID
     }
 
+    // Escrow native tokens, e.g. SUI
     public(friend) fun escrow_token<T>(self: &mut BridgeEscrow, coin: Coin<T>) {
         // TODO: allow list
         let coin_type = type_name::get<T>();
