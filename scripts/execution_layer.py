@@ -491,6 +491,7 @@ def generate_lib(output_file: TextIO):
                 "{spc}    protocol_config,\n"
                 "{spc}    paranoid_type_checks,\n"
                 "{spc}    silent,\n"
+                "{spc}    enable_profiler,\n"
                 "{spc})?),\n"
             )
             return "\n".join(
