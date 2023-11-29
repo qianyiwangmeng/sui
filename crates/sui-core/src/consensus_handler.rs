@@ -231,15 +231,7 @@ impl<T: ObjectStore + Send + Sync, C: CheckpointServiceNotify + Send + Sync>
 
         let round = consensus_output.leader_round();
 
-        assert!(
-            round >= last_committed_round,
-            "Round less than last committed: {} < {}; {} {}",
-            round,
-            last_committed_round,
-            consensus_output.leader_author_index(),
-            consensus_output.commit_sub_dag_index()
-        );
-        if last_committed_round == round {
+        if round <= last_committed_round {
             // we can receive the same commit twice after restart
             // It is critical that the writes done by this function are atomic - otherwise we can
             // lose the later parts of a commit if we restart midway through processing it.
@@ -386,6 +378,12 @@ impl<T: ObjectStore + Send + Sync, C: CheckpointServiceNotify + Send + Sync>
                 }
             }
         }
+
+        // println!(
+        //     "Received consensus output {} with {} transactions",
+        //     consensus_output,
+        //     transactions.len(),
+        // );
 
         for i in 0..self.committee.size() {
             let hostname = self

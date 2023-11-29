@@ -13,7 +13,7 @@ use parking_lot::Mutex;
 use storage::{ConsensusStore, HeaderStore};
 use store::rocks::DBBatch;
 use tokio::time::Instant;
-use tracing::{debug, warn};
+use tracing::{debug, error, warn};
 use types::{
     error::DagResult, Certificate, CertificateV2, CommittedSubDag, ConsensusCommitAPI, HeaderAPI,
     HeaderKey, ReputationScores, Round, SignedHeader, TimestampMs,
@@ -272,7 +272,7 @@ impl DagState {
     ) -> DagResult<bool> {
         let header_key = signed_header.key();
         if inner.headers.contains_key(&header_key) {
-            debug!("try_accept_internal: {} already accepted.", header_key);
+            debug!(key=?header_key, "try_accept_internal: already accepted.");
             return Ok(false);
         }
         // if let Some(suspended_header) = inner.suspended.get(&key) {
@@ -288,23 +288,30 @@ impl DagState {
             if inner.genesis.contains_key(ancestor) {
                 continue;
             }
+
             // Look up all accepted headers from the ancestor author.
             let author_headers = &inner.accepted_by_author[ancestor.author().0 as usize];
             assert!(!author_headers.is_empty());
             if author_headers.contains(ancestor) {
                 continue;
             }
+
             // Optimization: accepted header cache and its indexes have the invariant that they
             // contain the most recent (in round) headers from each authority.
             // If a header missing from cache is more recent than some cached headers from the same
             // author, it will be missing from storage too.
-            if author_headers.first().unwrap().round() < ancestor.round() {
+            // TODO(narwhalceti): handle byzantine headers.
+            if author_headers.last().unwrap().round() < ancestor.round() {
                 missing.push(*ancestor);
             } else {
                 // Otherwise, storage has to be consulted to determine if the header has been accepted.
                 to_check.push(*ancestor);
             }
         }
+        debug!(
+            key=?header_key, missing=?missing, to_check=?to_check,
+            "try_accept_internal: checked missing."
+        );
 
         // In general accessing rocksdb in a critical section should be avoided.
         // But this should be very rare, especially when no node is Byzantine.
@@ -315,7 +322,7 @@ impl DagState {
             for (checked_key, exists) in to_check.into_iter().zip(result.into_iter()) {
                 if !exists {
                     missing.push(checked_key);
-                    panic!(
+                    error!(
                         "Header {} has unexpected missing ancestor {}",
                         header_key, checked_key
                     );
@@ -324,10 +331,7 @@ impl DagState {
         }
 
         if !missing.is_empty() {
-            debug!(
-                "try_accept_internal: {} suspended with missing {:?}.",
-                header_key, missing
-            );
+            debug!(key=?header_key, "try_accept_internal: suspended");
             for ancestor in &missing {
                 inner
                     .suspended
@@ -344,7 +348,9 @@ impl DagState {
             } else {
                 assert_eq!(
                     suspended_header.missing_ancestors,
-                    missing.into_iter().collect()
+                    missing.into_iter().collect(),
+                    "Suspended header {} has inconsistent missing ancestors",
+                    header_key,
                 );
             }
             inner
@@ -355,6 +361,7 @@ impl DagState {
             return Ok(false);
         }
 
+        debug!(key=?header_key, "try_accept_internal: accepting");
         inner.accept_internal(signed_header);
 
         inner
@@ -465,32 +472,45 @@ impl Inner {
                 CommittedSubDag::from_commit(last_consensus_commit, committed, leader);
             self.last_committed_sub_dag = Some(committed_sub_dag);
         }
+
+        let min_round = std::cmp::min(
+            self.highest_proposed_round,
+            self.last_committed_sub_dag
+                .as_ref()
+                .map_or(0, |c| c.leader_round()),
+        );
+        for header in header_store.read_after_round(min_round) {
+            self.accept_internal(header);
+        }
     }
 
     fn accept_internal(&mut self, signed_header: SignedHeader) {
         let mut to_accept = vec![signed_header];
         while let Some(header) = to_accept.pop() {
             // TODO(narwhalceti): carry out additional validations on the header, e.g. parent link.
-            let key = header.key();
-            debug!("try_accept_internal: {} accepted", key);
-            self.headers.insert(key, header);
+            let header_key = header.key();
+            debug!(key=?header_key, "try_accept_internal: accepted");
+            let author_index = header_key.author().0 as usize;
 
-            let author_index = key.author().0 as usize;
-            let author_headers = &mut self.accepted_by_author[author_index];
             // GC is done in flush().
-            author_headers.insert(key);
+            self.headers.insert(header_key, header);
+            let author_headers = &mut self.accepted_by_author[author_index];
+            author_headers.insert(header_key);
 
             let insert_to_accepted_by_round =
                 if let Some((round, _)) = self.accepted_by_round.first_key_value() {
-                    key.round() >= *round
+                    header_key.round() >= *round
                 } else {
                     true
                 };
             if insert_to_accepted_by_round {
-                let header_by_round = self.accepted_by_round.entry(key.round()).or_default();
-                header_by_round.headers.insert(key);
-                if header_by_round.authors.insert(key.author()) {
-                    header_by_round.total_stake += self.committee.stake_by_id(key.author());
+                let header_by_round = self
+                    .accepted_by_round
+                    .entry(header_key.round())
+                    .or_default();
+                header_by_round.headers.insert(header_key);
+                if header_by_round.authors.insert(header_key.author()) {
+                    header_by_round.total_stake += self.committee.stake_by_id(header_key.author());
                     if header_by_round.quorum_time.is_none()
                         && header_by_round.total_stake >= self.committee.quorum_threshold()
                     {
@@ -500,21 +520,24 @@ impl Inner {
             }
 
             // Try to accept dependents of the accepted header.
-            let Some(suspended_header) = self.suspended.remove(&key) else {
+            let Some(suspended_header) = self.suspended.remove(&header_key) else {
+                debug!(key=?header_key, "try_accept_internal: not suspended before");
                 continue;
             };
             if !suspended_header.missing_ancestors.is_empty() {
                 panic!(
                     "Suspended header {} should no longer have missing ancestors: {:?}",
-                    key, suspended_header,
+                    header_key, suspended_header,
                 );
             }
+            debug!(key=?header_key, dependents=?suspended_header.dependents, "try_accept_internal: looping over dependents");
             for child in suspended_header.dependents {
+                debug!(key=?header_key, child=?child, "try_accept_internal: removing missing ancestor link at child");
                 let suspended_child = self
                     .suspended
                     .get_mut(&child)
                     .expect("missing_ancestors should exist!");
-                suspended_child.missing_ancestors.remove(&key);
+                suspended_child.missing_ancestors.remove(&header_key);
                 if suspended_child.missing_ancestors.is_empty() {
                     self.suspended_count[child.author().0 as usize] -= 1;
                     to_accept.push(
@@ -677,7 +700,12 @@ impl Inner {
             .header()
             .ancestors()
             .iter()
-            .map(|key| &self.headers[key])
+            .filter_map(|key| {
+                if key.round() != target.round() + 1 {
+                    return None;
+                }
+                Some(self.headers[key].clone())
+            })
             .collect();
         let target_index = target.author().0 as usize;
 
@@ -974,13 +1002,14 @@ impl Inner {
             self.persisted[i] = std::cmp::max(self.persisted[i], accepted.last().unwrap().round());
         }
         // Clear cached headers that are no longer needed.
-        for accepted in &mut self.accepted_by_author {
+        for (author_index, accepted) in &mut self.accepted_by_author.iter_mut().enumerate() {
             // Keep a minimum number of headers per authority, or more if some headers need to be
             // kept for propose and commit.
             while accepted.len() > HEADERS_CACHED_PER_AUTHORITY {
                 let key = accepted.first().unwrap();
-                let index = key.author().0 as usize;
-                if key.round() >= self.persisted[index] || key.round() >= self.committed[index] {
+                if key.round() >= self.persisted[author_index]
+                    || key.round() >= self.committed[author_index]
+                {
                     break;
                 }
                 self.headers.remove(key);

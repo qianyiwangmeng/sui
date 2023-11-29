@@ -7,7 +7,7 @@ use std::{
     cmp::Ordering,
     collections::VecDeque,
     iter,
-    ops::Bound::{Excluded, Included},
+    ops::Bound::{Excluded, Included, Unbounded},
     sync::Arc,
 };
 use store::{
@@ -144,6 +144,18 @@ impl HeaderStore {
             .into_iter()
             .map(|h| h.unwrap())
             .collect())
+    }
+
+    /// Retrieves recent headers from the same authority, with max num_limit.
+    pub fn read_after_round(&self, min_round: Round) -> Vec<SignedHeader> {
+        let mut headers = Vec::new();
+        for (_key, header) in self.header_by_key.range_iter((
+            Included(HeaderKey::new(min_round, 0.into(), HeaderDigest::default())),
+            Unbounded,
+        )) {
+            headers.push(header);
+        }
+        headers
     }
 
     /// Waits to get notified until the requested header becomes available

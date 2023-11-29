@@ -123,6 +123,9 @@ impl Producer {
                 continue;
             };
 
+            // if self.authority_id.0 == 0 {
+            //     println!("Proposing header at round {}", header_round);
+            // }
             self.metrics.current_round.set(header_round as i64);
             let mut batch_messages =
                 own_digest_messages.split_off(std::cmp::min(own_digest_messages.len(), 2000));

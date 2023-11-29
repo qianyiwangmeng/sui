@@ -57,7 +57,7 @@ struct HeaderFetcherState {
     /// Verifies then sends headers to Core for processing.
     verifier: Arc<Verifier>,
     /// Sends verified headers to Core for processing.
-    tx_verified_header: Sender<SignedHeader>,
+    tx_verified_headers: Sender<SignedHeader>,
     /// The metrics handler
     metrics: Arc<PrimaryMetrics>,
 }
@@ -70,14 +70,14 @@ impl HeaderFetcher {
         network: anemo::Network,
         dag_state: Arc<DagState>,
         verifier: Arc<Verifier>,
-        tx_verified_header: Sender<SignedHeader>,
+        tx_verified_headers: Sender<SignedHeader>,
         metrics: Arc<PrimaryMetrics>,
     ) -> Self {
         let state = Arc::new(HeaderFetcherState {
             authority_id,
             network,
             verifier,
-            tx_verified_header,
+            tx_verified_headers,
             metrics,
         });
         let (tx_fetcher_kickstart, mut rx_fetcher_kickstart) = watch::channel(());
