@@ -7,7 +7,9 @@ use std::collections::HashMap;
 use store::rocks::{open_cf, DBBatch, DBMap, MetricConf, ReadWriteOptions};
 use store::{reopen, Map, TypedStoreError};
 use tracing::debug;
-use types::{CommittedSubDag, ConsensusCommit, ConsensusCommitV2, Round, SequenceNumber};
+use types::{
+    CommittedSubDag, ConsensusCommit, ConsensusCommitAPI, ConsensusCommitV2, Round, SequenceNumber,
+};
 
 /// The persistent storage of the sequencer.
 #[derive(Clone)]
@@ -165,7 +167,7 @@ mod test {
     use crate::ConsensusStore;
     use std::collections::HashMap;
     use test_utils::{latest_protocol_version, CommitteeFixture};
-    use types::{Certificate, CommittedSubDag, ReputationScores};
+    use types::{Certificate, CommittedSubDag, ConsensusCommitAPI, ReputationScores};
 
     #[tokio::test]
     async fn test_read_latest_final_reputation_scores() {

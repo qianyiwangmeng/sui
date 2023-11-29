@@ -147,6 +147,18 @@ impl Display for AuthorityIdentifier {
     }
 }
 
+impl From<u16> for AuthorityIdentifier {
+    fn from(id: u16) -> Self {
+        Self(id)
+    }
+}
+
+impl From<AuthorityIdentifier> for u16 {
+    fn from(id: AuthorityIdentifier) -> Self {
+        id.0
+    }
+}
+
 impl Committee {
     pub const DEFAULT_FILENAME: &'static str = "committee.json";
 

@@ -337,8 +337,9 @@ impl PrimaryNodeInner {
 
         // Check for any sub-dags that have been sent by consensus but were not processed by the executor.
         let restored_consensus_output = get_restored_consensus_output(
+            committee.clone(),
+            store.header_store.clone(),
             store.consensus_store.clone(),
-            store.certificate_store.clone(),
             &execution_state,
         )
         .await?;
@@ -429,8 +430,9 @@ impl PrimaryNodeInner {
 
         // Check for any sub-dags that have been sent by consensus but were not processed by the executor.
         let restored_consensus_output = get_restored_consensus_output(
+            committee.clone(),
+            store.header_store.clone(),
             store.consensus_store.clone(),
-            store.certificate_store.clone(),
             &execution_state,
         )
         .await?;

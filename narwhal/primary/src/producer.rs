@@ -1,4 +1,4 @@
-use std::{cmp::min, collections::VecDeque, mem::swap, sync::Arc, time::Duration};
+use std::{collections::VecDeque, mem::swap, sync::Arc, time::Duration};
 
 use config::{AuthorityIdentifier, Committee, WorkerCache};
 use crypto::{traits::Signer, NetworkKeyPair};

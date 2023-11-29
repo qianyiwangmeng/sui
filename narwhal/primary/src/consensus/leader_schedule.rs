@@ -13,7 +13,7 @@ use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
 use storage::ConsensusStore;
 use sui_protocol_config::ProtocolConfig;
 use tracing::{debug, trace};
-use types::{Certificate, ReputationScores, Round};
+use types::{Certificate, ConsensusCommitAPI, ReputationScores, Round};
 
 use super::Dag;
 

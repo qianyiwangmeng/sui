@@ -12,7 +12,6 @@ use futures::{stream::FuturesUnordered, StreamExt};
 use mysten_metrics::metered_channel::Sender;
 use mysten_metrics::{monitored_future, monitored_scope};
 use network::anemo_ext::NetworkExt as _;
-use network::CancelOnDropHandler;
 use rand::{rngs::ThreadRng, seq::SliceRandom};
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use sui_protocol_config::ProtocolConfig;

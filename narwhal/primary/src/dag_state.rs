@@ -15,8 +15,8 @@ use store::rocks::DBBatch;
 use tokio::time::Instant;
 use tracing::{debug, warn};
 use types::{
-    error::DagResult, Certificate, CertificateV2, CommittedSubDag, HeaderAPI, HeaderKey,
-    ReputationScores, Round, SignedHeader, TimestampMs,
+    error::DagResult, Certificate, CertificateV2, CommittedSubDag, ConsensusCommitAPI, HeaderAPI,
+    HeaderKey, ReputationScores, Round, SignedHeader, TimestampMs,
 };
 
 use crate::{consensus::LeaderSchedule, metrics::PrimaryMetrics};
@@ -78,12 +78,13 @@ impl DagState {
             highest_proposed_round: 0,
             pending_leaders: VecDeque::default(),
             leader_schedule,
-            recent_committed_sub_dag: VecDeque::default(),
+            last_committed_sub_dag: None,
+            recent_committed_sub_dags: VecDeque::default(),
             committed,
             highest_voting_leader_round: 0,
             metrics,
         };
-        inner.recover();
+        inner.recover(&header_store, &consensus_store);
         Self {
             inner: Arc::new(Mutex::new(inner)),
             header_store,
@@ -269,9 +270,9 @@ impl DagState {
         inner: &mut Inner,
         signed_header: SignedHeader,
     ) -> DagResult<bool> {
-        let key = signed_header.key();
-        if inner.headers.contains_key(&key) {
-            debug!("try_accept_internal: {} already accepted.", key);
+        let header_key = signed_header.key();
+        if inner.headers.contains_key(&header_key) {
+            debug!("try_accept_internal: {} already accepted.", header_key);
             return Ok(false);
         }
         // if let Some(suspended_header) = inner.suspended.get(&key) {
@@ -311,9 +312,13 @@ impl DagState {
             let result = self
                 .header_store
                 .multi_contains(to_check.clone().into_iter())?;
-            for (key, exists) in to_check.into_iter().zip(result.into_iter()) {
+            for (checked_key, exists) in to_check.into_iter().zip(result.into_iter()) {
                 if !exists {
-                    missing.push(key);
+                    missing.push(checked_key);
+                    panic!(
+                        "Header {} has unexpected missing ancestor {}",
+                        header_key, checked_key
+                    );
                 }
             }
         }
@@ -321,7 +326,7 @@ impl DagState {
         if !missing.is_empty() {
             debug!(
                 "try_accept_internal: {} suspended with missing {:?}.",
-                key, missing
+                header_key, missing
             );
             for ancestor in &missing {
                 inner
@@ -329,11 +334,11 @@ impl DagState {
                     .entry(*ancestor)
                     .or_default()
                     .dependents
-                    .insert(key);
+                    .insert(header_key);
             }
-            let suspended_header = inner.suspended.entry(key).or_default();
+            let suspended_header = inner.suspended.entry(header_key).or_default();
             if suspended_header.signed_header.is_none() {
-                inner.suspended_count[key.author().0 as usize] += 1;
+                inner.suspended_count[header_key.author().0 as usize] += 1;
                 suspended_header.signed_header = Some(signed_header);
                 suspended_header.missing_ancestors = missing.into_iter().collect();
             } else {
@@ -403,11 +408,12 @@ struct Inner {
     // TODO(mysticeti): recover.
     // Leaders that cannot commit yet.
     pending_leaders: VecDeque<(Round, AuthorityIdentifier, LeaderSelectionStatus)>,
-    // pending_leader_status: VecDeque<LeaderSelectionStatus>,
     // Reference to avoid selecting bad nodes as leaders.
     leader_schedule: LeaderSchedule,
+    // Last committed sub dag.
+    last_committed_sub_dag: Option<CommittedSubDag>,
     // TODO: make the format more efficient
-    recent_committed_sub_dag: VecDeque<CommittedSubDag>,
+    recent_committed_sub_dags: VecDeque<CommittedSubDag>,
     // Watermark of committed headers per author.
     committed: Vec<Round>,
     // Highest round where leaders are voted on.
@@ -417,21 +423,48 @@ struct Inner {
 }
 
 impl Inner {
-    fn recover(&mut self) {
-        let genesis = self.genesis.clone();
-        for (_, signed_header) in genesis {
-            self.accept_internal(signed_header);
+    fn recover(&mut self, header_store: &HeaderStore, consensus_store: &ConsensusStore) {
+        let genesis: Vec<_> = self.genesis.values().cloned().collect();
+        let last_committed_round = consensus_store.read_last_committed();
+
+        for (i, genesis_header) in genesis.iter().enumerate() {
+            let author = (i as u16).into();
+            let recent_headers = header_store
+                .read_recent(author, HEADERS_CACHED_PER_AUTHORITY)
+                .unwrap();
+            self.persisted[i] = recent_headers.last().map_or(0, |h| h.round());
+            if author == self.authority_id {
+                self.highest_proposed_round = self.persisted[i];
+            }
+
+            if recent_headers.len() < HEADERS_CACHED_PER_AUTHORITY {
+                self.accept_internal(genesis_header.clone());
+            }
+            for signed_header in recent_headers {
+                self.accept_internal(signed_header);
+            }
+
+            self.committed[i] = last_committed_round.get(&author).map_or(0, |r| *r);
         }
 
-        // Recover from headers and consensus commit in storage.
+        if let Some(last_consensus_commit) = consensus_store.get_latest_sub_dag() {
+            let committed = header_store
+                .read_all(last_consensus_commit.headers())
+                .unwrap()
+                .into_iter()
+                .map(|h| self.make_certificate(&h.unwrap()))
+                .collect();
+            let leader = header_store
+                .read(last_consensus_commit.leader())
+                .unwrap()
+                .unwrap();
+            let leader = self.make_certificate(&leader);
+            self.highest_voting_leader_round = leader.round();
 
-        // Read recent_committed_sub_dag and committed round per author from storage.
-        // let last_commit = ...
-        // let leaders = leader_schedule.leader_sequence(last_commit.leader.round());
-        // let leader_index = leaders
-        //     .iter()
-        //     .position(|&leader| leader == last_commit.leader.author())
-        //     .unwrap();
+            let committed_sub_dag =
+                CommittedSubDag::from_commit(last_consensus_commit, committed, leader);
+            self.last_committed_sub_dag = Some(committed_sub_dag);
+        }
     }
 
     fn accept_internal(&mut self, signed_header: SignedHeader) {
@@ -630,7 +663,8 @@ impl Inner {
         for leader in selected_leaders {
             let commit = self.commit_leader(leader);
             commits.push(commit.clone());
-            self.recent_committed_sub_dag.push_back(commit);
+            self.last_committed_sub_dag = Some(commit.clone());
+            self.recent_committed_sub_dags.push_back(commit);
         }
 
         (commits, false)
@@ -855,10 +889,7 @@ impl Inner {
 
         let certificates: Vec<_> = commit_headers
             .into_iter()
-            .map(|h| {
-                CertificateV2::new_unsigned(&self.committee, h.header().clone(), Vec::new())
-                    .unwrap()
-            })
+            .map(|h| self.make_certificate(h))
             .collect();
         let leader_certificate = certificates[0].clone();
         let reputation_score = self.compute_reputation_score(&certificates);
@@ -866,7 +897,7 @@ impl Inner {
             certificates,
             leader_certificate,
             reputation_score,
-            self.recent_committed_sub_dag.back(),
+            self.last_committed_sub_dag.as_ref(),
         )
     }
 
@@ -878,7 +909,7 @@ impl Inner {
         // TODO: when schedule change is implemented we should probably change a little bit
         // this logic here.
         const NUM_SUB_DAGS_PER_SCHEDULE: u64 = 50;
-        let Some(last_committed_sub_dag) = self.recent_committed_sub_dag.back() else {
+        let Some(last_committed_sub_dag) = self.last_committed_sub_dag.as_ref() else {
             return ReputationScores::new(&self.committee);
         };
 
@@ -918,10 +949,10 @@ impl Inner {
     }
 
     fn last_committed_leader_round(&self) -> Round {
-        self.recent_committed_sub_dag
-            .back()
+        self.last_committed_sub_dag
+            .as_ref()
             .map(|commit| commit.leader_round())
-            .unwrap_or_default()
+            .unwrap_or(0)
     }
 
     fn flush(
@@ -940,7 +971,7 @@ impl Inner {
                 ))
                 .map(|key| self.headers.get(key).unwrap());
             header_store.write_all(headers, batch).unwrap();
-            self.persisted[i] = accepted.last().unwrap().round();
+            self.persisted[i] = std::cmp::max(self.persisted[i], accepted.last().unwrap().round());
         }
         // Clear cached headers that are no longer needed.
         for accepted in &mut self.accepted_by_author {
@@ -976,17 +1007,18 @@ impl Inner {
                     .iter()
                     .enumerate()
                     .map(|(i, r)| (AuthorityIdentifier(i as u16), *r)),
-                self.recent_committed_sub_dag.iter(),
+                self.recent_committed_sub_dags.iter(),
                 batch,
             )
             .unwrap();
         // Clear recent_committed_sub_dag.
-        if let Some(commit) = self.recent_committed_sub_dag.pop_back() {
-            self.recent_committed_sub_dag.clear();
-            self.recent_committed_sub_dag.push_back(commit);
-        }
+        self.recent_committed_sub_dags.clear();
 
         Ok(())
+    }
+
+    fn make_certificate(&self, header: &SignedHeader) -> Certificate {
+        CertificateV2::new_unsigned(&self.committee, header.header().clone(), Vec::new()).unwrap()
     }
 }
 

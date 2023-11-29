@@ -2223,6 +2223,12 @@ impl From<CertificateDigest> for Digest<{ crypto::DIGEST_LENGTH }> {
     }
 }
 
+impl From<HeaderDigest> for CertificateDigest {
+    fn from(hd: HeaderDigest) -> Self {
+        CertificateDigest(hd.0)
+    }
+}
+
 impl fmt::Debug for CertificateDigest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(

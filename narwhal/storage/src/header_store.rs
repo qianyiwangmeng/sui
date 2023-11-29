@@ -1,10 +1,15 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{cmp::Ordering, iter, sync::Arc};
-
 use config::AuthorityIdentifier;
 use mysten_common::sync::notify_read::NotifyRead;
+use std::{
+    cmp::Ordering,
+    collections::VecDeque,
+    iter,
+    ops::Bound::{Excluded, Included},
+    sync::Arc,
+};
 use store::{
     rocks::{DBBatch, DBMap},
     Map,
@@ -68,10 +73,7 @@ impl HeaderStore {
         headers: impl Iterator<Item = &'a SignedHeader>,
         batch: &mut DBBatch,
     ) -> StoreResult<()> {
-        let headers: Vec<_> = headers
-            .into_iter()
-            .map(|header| (header.key(), header))
-            .collect();
+        let headers: Vec<_> = headers.map(|header| (header.key(), header)).collect();
         let indices: Vec<_> = headers
             .iter()
             .map(|(k, _h)| {
@@ -82,7 +84,6 @@ impl HeaderStore {
 
         // write the headers by their keys
         batch.insert_batch(&self.header_by_key, headers)?;
-
         // write the header keys by their authors
         batch.insert_batch(&self.header_key_by_author, indices)?;
 
@@ -114,6 +115,35 @@ impl HeaderStore {
         keys: impl IntoIterator<Item = HeaderKey>,
     ) -> StoreResult<Vec<Option<SignedHeader>>> {
         self.header_by_key.multi_get(keys)
+    }
+
+    /// Retrieves recent headers from the same authority, with max num_limit.
+    pub fn read_recent(
+        &self,
+        authority: AuthorityIdentifier,
+        num_limit: usize,
+    ) -> StoreResult<Vec<SignedHeader>> {
+        let mut keys = VecDeque::new();
+        for ((author, round, digest), ()) in self
+            .header_key_by_author
+            .range_iter((
+                Included((authority, 0, HeaderDigest::default())),
+                Excluded(((authority.0 + 1).into(), 0, HeaderDigest::default())),
+            ))
+            .skip_to_last()
+            .reverse()
+        {
+            keys.push_front(HeaderKey::new(round, author, digest));
+            if keys.len() >= num_limit {
+                break;
+            }
+        }
+        Ok(self
+            .header_by_key
+            .multi_get(keys)?
+            .into_iter()
+            .map(|h| h.unwrap())
+            .collect())
     }
 
     /// Waits to get notified until the requested header becomes available

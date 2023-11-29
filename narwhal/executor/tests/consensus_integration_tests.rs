@@ -24,8 +24,9 @@ async fn test_recovery() {
     // Create storage
     let storage = NodeStorage::reopen(temp_dir(), None);
 
-    let consensus_store = storage.consensus_store;
+    let header_store = storage.header_store;
     let certificate_store = storage.certificate_store;
+    let consensus_store = storage.consensus_store;
 
     // Setup consensus
     let fixture = CommitteeFixture::builder().build();
@@ -85,7 +86,7 @@ async fn test_recovery() {
     );
 
     let _consensus_handle = Consensus::spawn(
-        committee,
+        committee.clone(),
         GC_DEPTH,
         consensus_store.clone(),
         certificate_store.clone(),
@@ -136,8 +137,9 @@ async fn test_recovery() {
             .returning(|| 1);
 
         let consensus_output = get_restored_consensus_output(
+            committee.clone(),
+            header_store.clone(),
             consensus_store.clone(),
-            certificate_store.clone(),
             &execution_state,
         )
         .await

@@ -11,7 +11,7 @@ use network::{
 };
 use parking_lot::Mutex;
 use tokio::{sync::broadcast, task::JoinSet, time::sleep};
-use tracing::{error, trace, warn};
+use tracing::{trace, warn};
 use types::{PrimaryToPrimaryClient, SendHeaderRequest, SendHeaderResponse, SignedHeader};
 
 /// Broadcaster ensures headers are broadcasted to other primaries with retries for network errors.
