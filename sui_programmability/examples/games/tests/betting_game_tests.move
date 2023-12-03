@@ -47,13 +47,13 @@ module games::betting_game_tests {
         test_scenario::next_tx(scenario, user2);
         mint(user2, 200, scenario);
         let coin = test_scenario::take_from_sender<Coin<SUI>>(scenario);
-        betting_game::play(&random_state, coin, &mut game, test_scenario::ctx(scenario));
+        betting_game::play(&mut game, &random_state, coin, test_scenario::ctx(scenario));
         assert!(betting_game::get_balance(&game) == 1200, 1); // lost 200
 
         test_scenario::next_tx(scenario, user2);
         mint(user2, 200, scenario);
         let coin = test_scenario::take_from_sender<Coin<SUI>>(scenario);
-        betting_game::play(&random_state, coin, &mut game, test_scenario::ctx(scenario));
+        betting_game::play(&mut game, &random_state, coin, test_scenario::ctx(scenario));
         assert!(betting_game::get_balance(&game) == 1002, 1); // won 200*99/100
         // check that received the right amount
         test_scenario::next_tx(scenario, user2);
@@ -64,13 +64,13 @@ module games::betting_game_tests {
         test_scenario::next_tx(scenario, user2);
         mint(user2, 100, scenario);
         let coin = test_scenario::take_from_sender<Coin<SUI>>(scenario);
-        betting_game::play(&random_state, coin, &mut game, test_scenario::ctx(scenario));
+        betting_game::play(&mut game, &random_state, coin, test_scenario::ctx(scenario));
         assert!(betting_game::get_balance(&game) == 1102, 1); // lost again
 
         test_scenario::next_tx(scenario, user2);
         mint(user2, 200, scenario);
         let coin = test_scenario::take_from_sender<Coin<SUI>>(scenario);
-        betting_game::play(&random_state, coin, &mut game, test_scenario::ctx(scenario));
+        betting_game::play(&mut game, &random_state, coin, test_scenario::ctx(scenario));
         assert!(betting_game::get_balance(&game) == 904, 1); // won 200*99/100
         // check that received the right amount
         test_scenario::next_tx(scenario, user2);

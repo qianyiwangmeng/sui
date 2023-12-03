@@ -68,7 +68,7 @@ module games::betting_game {
     ///
     /// The function does not return anything to the caller to make sure its output cannot be used in later PTB
     /// commands.
-    entry fun play(r: &Random, coin: Coin<SUI>, game: &mut Game, ctx: &mut TxContext) {
+    entry fun play(game: &mut Game, r: &Random, coin: Coin<SUI>, ctx: &mut TxContext) {
         assert!(tx_context::epoch(ctx) == game.epoch, EInvalidEpoch);
         assert!(coin::value(&coin) > 0 && balance::value(&game.balance) >= coin::value(&coin), EInvalidAmount);
 
