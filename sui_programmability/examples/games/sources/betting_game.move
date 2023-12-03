@@ -14,7 +14,6 @@ module games::betting_game {
     use sui::coin::{Self, Coin};
     use sui::object::{Self, UID};
     use sui::random::{Self, Random, new_generator};
-
     use sui::sui::SUI;
     use sui::transfer;
     use sui::tx_context::{Self, TxContext};
@@ -65,14 +64,6 @@ module games::betting_game {
         coin::take(&mut game.balance, full_balance, ctx)
     }
 
-    public fun get_balance(game: &Game): u64 {
-        balance::value(&game.balance)
-    }
-
-    public fun get_epoch(game: &Game): u64 {
-        game.epoch
-    }
-
     /// Play one turn of the game.
     ///
     /// The function does not return anything to the caller to make sure its output cannot be used in later PTB
@@ -94,4 +85,13 @@ module games::betting_game {
         };
     }
 
+    #[test_only]
+    public fun get_balance(game: &Game): u64 {
+        balance::value(&game.balance)
+    }
+
+    #[test_only]
+    public fun get_epoch(game: &Game): u64 {
+        game.epoch
+    }
 }
