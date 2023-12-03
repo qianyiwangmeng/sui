@@ -19,7 +19,7 @@ module games::lottery_tests {
     }
 
     #[test]
-    fun test_betting_game() {
+    fun test_lottery_game() {
         let user1 = @0x0;
         let user2 = @0x1;
         let user3 = @0x2;
@@ -58,39 +58,43 @@ module games::lottery_tests {
         test_scenario::next_tx(scenario, user1);
         mint(user1, 10, scenario);
         let coin = test_scenario::take_from_sender<Coin<SUI>>(scenario);
-        let t1 = lottery::play(&mut game, coin, &clock, &random_state, test_scenario::ctx(scenario));
+        let t1 = lottery::play(&mut game, coin, &clock, test_scenario::ctx(scenario));
         assert!(lottery::get_participants(&game) == 1, 1);
         lottery::destroy_ticket(t1); // loser
 
         test_scenario::next_tx(scenario, user2);
         mint(user2, 10, scenario);
         let coin = test_scenario::take_from_sender<Coin<SUI>>(scenario);
-        let t2 = lottery::play(&mut game, coin, &clock, &random_state, test_scenario::ctx(scenario));
+        let t2 = lottery::play(&mut game, coin, &clock, test_scenario::ctx(scenario));
         assert!(lottery::get_participants(&game) == 2, 1);
         lottery::destroy_ticket(t2); // loser
 
         test_scenario::next_tx(scenario, user3);
         mint(user3, 10, scenario);
         let coin = test_scenario::take_from_sender<Coin<SUI>>(scenario);
-        let t3 = lottery::play(&mut game, coin, &clock, &random_state, test_scenario::ctx(scenario));
+        let t3 = lottery::play(&mut game, coin, &clock, test_scenario::ctx(scenario));
         assert!(lottery::get_participants(&game) == 3, 1);
-        lottery::destroy_ticket(t3); // loser
+
 
         test_scenario::next_tx(scenario, user4);
         mint(user4, 10, scenario);
         let coin = test_scenario::take_from_sender<Coin<SUI>>(scenario);
-        let t4 = lottery::play( &mut game, coin, &clock, &random_state, test_scenario::ctx(scenario));
+        let t4 = lottery::play( &mut game, coin, &clock, test_scenario::ctx(scenario));
         assert!(lottery::get_participants(&game) == 4, 1);
+        lottery::destroy_ticket(t4); // loser
 
-        // Determine the winner (-> user4)
+        // Determine the winner (-> user3)
         clock::set_for_testing(&mut clock, 101);
-        lottery::determine_winner(&mut game, &random_state, &clock, test_scenario::ctx(scenario));
-        assert!(lottery::get_winner(&game) == option::some(4), 1);
+        lottery::get_determine_winner_capability(&game, &clock, test_scenario::ctx(scenario));
+        test_scenario::next_tx(scenario, user4);
+        let cap = test_scenario::take_from_sender<lottery::DetermineWinnerCapability>(scenario);
+        lottery::determine_winner(cap, &mut game, &random_state, test_scenario::ctx(scenario));
+        assert!(lottery::get_winner(&game) == option::some(3), 1);
         assert!(lottery::get_balance(&game) == 40, 1);
 
         // Take the winnings
-        test_scenario::next_tx(scenario, user4);
-        let coin = lottery::redeem(t4, &mut game, test_scenario::ctx(scenario));
+        test_scenario::next_tx(scenario, user3);
+        let coin = lottery::redeem(t3, &mut game, test_scenario::ctx(scenario));
         assert!(coin::value(&coin) == 40, 1);
         coin::burn_for_testing(coin);
 
