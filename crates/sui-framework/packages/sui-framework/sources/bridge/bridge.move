@@ -20,8 +20,6 @@ module sui::bridge {
     use sui::tx_context::{Self, TxContext};
 
     #[test_only]
-    use std::debug::print;
-    #[test_only]
     use sui::bridge_treasury::USDC;
     #[test_only]
     use sui::hex;
@@ -40,7 +38,8 @@ module sui::bridge {
         treasury: BridgeTreasury,
         pending_messages: Table<BridgeMessageKey, BridgeMessage>,
         approved_messages: Table<BridgeMessageKey, ApprovedBridgeMessage>,
-        paused: bool
+        freezed: bool,
+        last_emergency_op_seq_num: u64,
     }
 
     // message types
@@ -50,15 +49,16 @@ module sui::bridge {
     const TOKEN: u8 = 3;
     const NFT: u8 = 4;
 
+    // Emergency Op types
+    const FREEZE: u8 = 0;
+    const UNFREEZE: u8 = 1;
+
     struct BridgeMessage has copy, store, drop {
         // 0: token , 1: object ? TBD
         message_type: u8,
-        version: u8,
+        message_version: u8,
+        seq_num: u64,
         source_chain: u8,
-        bridge_seq_num: u64,
-        sender_address: vector<u8>,
-        target_chain: u8,
-        target_address: vector<u8>,
         payload: vector<u8>
     }
 
@@ -78,12 +78,25 @@ module sui::bridge {
         message_bytes: vector<u8>
     }
 
+    struct TokenBridgePayload {
+        sender_address: vector<u8>,
+        target_chain: u8,
+        target_address: vector<u8>,
+        token_type: u8,
+        amount: u64
+    }
+
+    struct EmergencyOpPayload {
+        op_type: u8
+    }
+
     const EUnexpectedMessageType: u64 = 0;
     const EUnauthorisedClaim: u64 = 1;
     const EMalformedMessageError: u64 = 2;
     const EUnexpectedTokenType: u64 = 3;
     const EUnexpectedChainID: u64 = 4;
     const ENotSystemAddress: u64 = 5;
+    const EUnexpectedSeqNum: u64 = 6;
 
     #[allow(unused_function)]
     fun create(ctx: &mut TxContext) {
@@ -96,37 +109,57 @@ module sui::bridge {
             treasury: bridge_treasury::create(ctx),
             pending_messages: table::new<BridgeMessageKey, BridgeMessage>(ctx),
             approved_messages: table::new<BridgeMessageKey, ApprovedBridgeMessage>(ctx),
-            paused: false
+            freezed: false,
+            last_emergency_op_seq_num: 0
         };
         transfer::share_object(bridge)
     }
 
-    fun serialise_token_bridge_payload<T>(token: &Coin<T>): vector<u8> {
+    fun serialise_token_bridge_payload<T>(
+        sender: address,
+        target_chain: u8,
+        target_address: vector<u8>,
+        token: &Coin<T>
+    ): vector<u8> {
         let payload = vector[];
-        let coin_type = bcs::to_bytes(&token_id<T>());
-        vector::append(&mut payload, coin_type);
-        let amount = bcs::to_bytes(&balance::value(coin::balance(token)));
-        vector::append(&mut payload, amount);
+        vector::append(&mut payload, bcs::to_bytes(&address::to_bytes(sender)));
+        vector::push_back(&mut payload, target_chain);
+        vector::append(&mut payload, bcs::to_bytes(&target_address));
+        vector::append(&mut payload, bcs::to_bytes(&token_id<T>()));
+        vector::append(&mut payload, bcs::to_bytes(&balance::value(coin::balance(token))));
         payload
     }
 
-    fun deserialise_token_bridge_payload(message: vector<u8>): (u8, u64) {
+    fun deserialise_token_bridge_payload(message: vector<u8>): TokenBridgePayload {
         let bcs = bcs::new(message);
-        let coin_type = bcs::peel_u8(&mut bcs);
+        let sender_address = bcs::peel_vec_u8(&mut bcs);
+        let target_chain = bcs::peel_u8(&mut bcs);
+        let target_address = bcs::peel_vec_u8(&mut bcs);
+        let token_type = bcs::peel_u8(&mut bcs);
         let amount = bcs::peel_u64(&mut bcs);
-        (coin_type, amount)
+        TokenBridgePayload {
+            sender_address,
+            target_chain,
+            target_address,
+            token_type,
+            amount
+        }
+    }
+
+    fun deserialise_emergency_op_payload(message: vector<u8>): EmergencyOpPayload {
+        let bcs = bcs::new(message);
+        EmergencyOpPayload {
+            op_type: bcs::peel_u8(&mut bcs)
+        }
     }
 
     fun deserialise_message(message: vector<u8>): BridgeMessage {
         let bcs = bcs::new(message);
         BridgeMessage {
             message_type: bcs::peel_u8(&mut bcs),
-            version: bcs::peel_u8(&mut bcs),
-            bridge_seq_num: bcs::peel_u64(&mut bcs),
+            message_version: bcs::peel_u8(&mut bcs),
+            seq_num: bcs::peel_u64(&mut bcs),
             source_chain: bcs::peel_u8(&mut bcs),
-            sender_address: bcs::peel_vec_u8(&mut bcs),
-            target_chain: bcs::peel_u8(&mut bcs),
-            target_address: bcs::peel_vec_u8(&mut bcs),
             payload: bcs::into_remainder_bytes(bcs)
         }
     }
@@ -134,12 +167,9 @@ module sui::bridge {
     fun serialise_message(message: BridgeMessage): vector<u8> {
         let BridgeMessage {
             message_type,
-            version,
-            bridge_seq_num,
+            message_version: version,
+            seq_num: bridge_seq_num,
             source_chain,
-            sender_address,
-            target_chain,
-            target_address,
             payload
         } = message;
 
@@ -148,11 +178,7 @@ module sui::bridge {
         vector::push_back(&mut message, version);
         vector::append(&mut message, bcs::to_bytes(&bridge_seq_num));
         vector::push_back(&mut message, source_chain);
-        vector::append(&mut message, bcs::to_bytes(&sender_address));
-        vector::push_back(&mut message, target_chain);
-        vector::append(&mut message, bcs::to_bytes(&target_address));
         vector::append(&mut message, payload);
-
         message
     }
 
@@ -167,15 +193,12 @@ module sui::bridge {
         let bridge_seq_num = self.sequence_num;
         self.sequence_num = self.sequence_num + 1;
         // create bridge message
-        let payload = serialise_token_bridge_payload(&token);
+        let payload = serialise_token_bridge_payload(tx_context::sender(ctx),target_chain, target_address, &token);
         let message = BridgeMessage {
             message_type: TOKEN,
-            version: 1,
+            message_version: 1,
             source_chain: chain_ids::sui(),
-            bridge_seq_num,
-            sender_address: address::to_bytes(tx_context::sender(ctx)),
-            target_chain,
-            target_address,
+            seq_num: bridge_seq_num,
             payload
         };
         // burn / escrow token
@@ -194,46 +217,29 @@ module sui::bridge {
     }
 
     // Record bridge message approvels in Sui, call by the bridge client
-    public fun approve_sui_bridge_message(
+    public fun approve_bridge_message(
         self: &mut Bridge,
-        bridge_seq_num: u64,
+        raw_message: vector<u8>,
         signatures: vector<vector<u8>>,
         ctx: &TxContext
     ) {
-        let key = BridgeMessageKey { source_chain: chain_ids::sui(), bridge_seq_num };
-        // retrieve pending request
-        let message = table::remove(&mut self.pending_messages,key);
-        let message_bytes = serialise_message(message);
         // varify signatures
-        bridge_committee::verify_signatures(&self.committee, message_bytes, signatures);
-        let approved_message = ApprovedBridgeMessage {
-            message,
-            approved_epoch: tx_context::epoch(ctx),
-            signatures,
+        bridge_committee::verify_signatures(&self.committee, raw_message, signatures);
+        let message = deserialise_message(raw_message);
+        // retrieve pending message if source chain is Sui
+        if (message.source_chain == chain_ids::sui()) {
+            let key = BridgeMessageKey { source_chain: chain_ids::sui(), bridge_seq_num: message.seq_num };
+            let recorded_message = table::remove(&mut self.pending_messages,key);
+            let message_bytes = serialise_message(recorded_message);
+            assert!(message_bytes == raw_message, EMalformedMessageError);
         };
-        // Store approval
-        table::add(&mut self.approved_messages, key, approved_message);
-    }
-
-    // Record foreign bridge message approvels in Sui, call by the bridge client
-    public fun approve_foreign_bridge_message(
-        self: &mut Bridge,
-        message: vector<u8>,
-        signatures: vector<vector<u8>>,
-        ctx: &TxContext
-    ) {
-        // varify signatures
-        bridge_committee::verify_signatures(&self.committee, message, signatures);
-        let message = deserialise_message(message);
-        // Ensure message is not from Sui
         assert!(message.source_chain != chain_ids::sui(), EUnexpectedChainID);
         let approved_message = ApprovedBridgeMessage {
             message,
             approved_epoch: tx_context::epoch(ctx),
             signatures,
         };
-        let key = BridgeMessageKey { source_chain: message.source_chain, bridge_seq_num: message.bridge_seq_num };
-
+        let key = BridgeMessageKey { source_chain: message.source_chain, bridge_seq_num: message.seq_num };
         // Store approval
         table::add(&mut self.approved_messages, key, approved_message);
     }
@@ -252,16 +258,24 @@ module sui::bridge {
             approved_epoch: _,
             signatures: _,
         } = table::remove(&mut self.approved_messages, key);
+
+        // extract token message
+        let TokenBridgePayload {
+            sender_address: _,
+            target_chain,
+            target_address,
+            token_type,
+            amount
+        } = deserialise_token_bridge_payload(message.payload);
+
         // ensure target chain is Sui
-        assert!(message.target_chain == chain_ids::sui(), EUnexpectedChainID);
+        assert!(target_chain == chain_ids::sui(), EUnexpectedChainID);
         // get owner address
-        let owner = address::from_bytes(message.target_address);
+        let owner = address::from_bytes(target_address);
         // ensure this is a token bridge message
         assert!(message.message_type == TOKEN, EUnexpectedMessageType);
-        // extract token message
-        let (token_id, amount) = deserialise_token_bridge_payload(message.payload);
         // check token type
-        assert!(bridge_treasury::token_id<T>() == token_id, EUnexpectedTokenType);
+        assert!(bridge_treasury::token_id<T>() == token_type, EUnexpectedTokenType);
         // claim from escrow or treasury
         let token = if (bridge_treasury::is_bridged_token<T>()) {
             bridge_treasury::mint<T>(&mut self.treasury, amount, ctx)
@@ -290,6 +304,28 @@ module sui::bridge {
         transfer::public_transfer(token, owner)
     }
 
+    public fun execute_emergency_op(
+        self: &mut Bridge,
+        emergency_op_message: vector<u8>,
+        signatures: vector<vector<u8>>
+    ) {
+        bridge_committee::verify_signatures(&self.committee,emergency_op_message,signatures);
+        let message = deserialise_message(emergency_op_message);
+        assert!(message.message_type == EMERGENCY_OP, EUnexpectedMessageType);
+        // check emergency ops seq number
+        assert!(message.seq_num == self.last_emergency_op_seq_num + 1, EUnexpectedSeqNum);
+        let EmergencyOpPayload { op_type } = deserialise_emergency_op_payload(message.payload);
+
+        if (op_type == FREEZE) {
+            self.freezed == true;
+        }else if (op_type == UNFREEZE) {
+            self.freezed == false;
+        }else {
+            abort 0
+        };
+        self.last_emergency_op_seq_num = message.seq_num;
+    }
+
     #[test]
     fun test_message_serialisation() {
         let sender_address = address::from_u256(100);
@@ -298,27 +334,27 @@ module sui::bridge {
 
         let coin = coin::mint_for_testing<USDC>(12345, ctx);
 
-        print(&bcs::to_bytes(&address::to_bytes(sender_address)));
-
         let token_bridge_message = BridgeMessage {
             message_type: TOKEN,
-            version: 1,
+            message_version: 1,
             source_chain: chain_ids::sui(),
-            bridge_seq_num: 10,
-            sender_address: address::to_bytes(sender_address),
-            target_chain: chain_ids::eth(),
-            target_address: address::to_bytes(address::from_u256(200)),
-            payload: serialise_token_bridge_payload(&coin)
+            seq_num: 10,
+            payload: serialise_token_bridge_payload(
+                sender_address,
+                chain_ids::eth(),
+                address::to_bytes(address::from_u256(200)),
+                &coin
+            )
         };
 
         let message = serialise_message(token_bridge_message);
         let expected_msg = hex::decode(
             b"03010a0000000000000000200000000000000000000000000000000000000000000000000000000000000064012000000000000000000000000000000000000000000000000000000000000000c8033930000000000000"
         );
+
         assert!(message == expected_msg, 0);
 
         let deserialised = deserialise_message(message);
-
         assert!(token_bridge_message == deserialised, 0);
 
         coin::burn_for_testing(coin);

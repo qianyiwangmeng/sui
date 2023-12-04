@@ -42,18 +42,4 @@ module sui::bridge_committee {
         };
         assert!(threshold >= committee.threshold, ESignatureBelowThreshold)
     }
-
-    public fun pause_bridge(self: &BridgeCommittee, bridge_pause_message: vector<u8>, signatures: vector<vector<u8>>) {
-        verify_signatures(self,bridge_pause_message,signatures)
-        // todo
-    }
-
-    public fun resume_bridge(
-        self: &BridgeCommittee,
-        bridge_resume_message: vector<u8>,
-        signatures: vector<vector<u8>>
-    ) {
-        verify_signatures(self,bridge_resume_message,signatures)
-        // todo
-    }
 }
