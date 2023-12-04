@@ -245,7 +245,7 @@ impl Interpreter {
                         )?;
                         current_frame.pc += 1; // advance past the Call instruction in the caller
 
-                        profile_close_frame!(gas_meter, func_name);
+                        profile_close_frame!(gas_meter, func_name.clone());
                         continue;
                     }
                     let frame = self
@@ -291,7 +291,7 @@ impl Interpreter {
                         )?;
                         current_frame.pc += 1; // advance past the Call instruction in the caller
 
-                        profile_close_frame!(gas_meter, func_name);
+                        profile_close_frame!(gas_meter, func_name.clone());
 
                         continue;
                     }
