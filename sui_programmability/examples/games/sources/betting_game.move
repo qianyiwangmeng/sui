@@ -72,9 +72,8 @@ module games::betting_game {
     /// The function does not return anything to the caller to make sure its output cannot be used in later PTB
     /// commands.
     /// In addition, the function follows the same steps whether the user won or lost to make sure the gas consumption
-    /// is different.
-    ///
-    /// TODO: validate in tests
+    /// is the same.
+    // TODO: validate in tests
     public fun play(game: &mut Hanger<Game>, r: &Random, coin: Coin<SUI>, ctx: &mut TxContext) {
         let game = hanger::load_data_mut(game);
         assert!(tx_context::epoch(ctx) == game.epoch, EInvalidEpoch);
