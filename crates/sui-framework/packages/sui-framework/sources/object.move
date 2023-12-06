@@ -118,8 +118,8 @@ module sui::object {
         }
     }
 
-    /// Create the `UID` for the singleton `Random` object.
-    /// This should only be called once from `random`.
+    /// Create the `UID` for the singleton `Bridge` object.
+    /// This should only be called once from `bridge`.
     public(friend) fun bridge(): UID {
         UID {
             id: ID { bytes: SUI_BRIDGE_ID }

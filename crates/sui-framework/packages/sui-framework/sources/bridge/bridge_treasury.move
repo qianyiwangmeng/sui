@@ -51,7 +51,7 @@ module sui::bridge_treasury {
 
         let (treasury_cap, metadata) = coin::create_currency(
             ETH {},
-            18,
+            8,
             b"ETH",
             b"Ethereum",
             b"Bridged Ethereum token",

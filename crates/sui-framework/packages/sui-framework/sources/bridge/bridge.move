@@ -52,7 +52,6 @@ module sui::bridge {
     const TOKEN: u8 = 0;
     const COMMITTEE_BLOCKLIST: u8 = 1;
     const EMERGENCY_OP: u8 = 2;
-
     //const COMMITTEE_CHANGE: u8 = 2;
     //const NFT: u8 = 4;
 
@@ -61,7 +60,6 @@ module sui::bridge {
     const UNFREEZE: u8 = 1;
 
     struct BridgeMessage has copy, store, drop {
-        // 0: token , 1: object ? TBD
         message_type: u8,
         message_version: u8,
         seq_num: u64,
@@ -230,6 +228,7 @@ module sui::bridge {
         ctx: &mut TxContext
     ) {
         let inner = load_inner_mut(self);
+        assert!(!inner.frozen, 0);
         let bridge_seq_num = inner.sequence_num;
         inner.sequence_num = inner.sequence_num + 1;
         // create bridge message

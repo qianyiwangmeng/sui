@@ -5,7 +5,7 @@
 module sui::bridge_committee {
     use std::vector;
 
-    use sui::ecdsa_r1;
+    use sui::ecdsa_k1;
     use sui::vec_map::{Self, VecMap};
 
     friend sui::bridge;
@@ -34,7 +34,7 @@ module sui::bridge_committee {
         let threshold = 0;
         while (i < signature_counts) {
             let signature = vector::borrow(&signatures, i);
-            let pubkey = ecdsa_r1::secp256r1_ecrecover(signature, &message, 1);
+            let pubkey = ecdsa_k1::secp256k1_ecrecover(signature, &message, 1);
             // get committee signature weight and check pubkey is part of the committee
             let weight = vec_map::get(&committee.pub_keys, &pubkey);
             threshold = threshold + *weight;
