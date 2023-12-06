@@ -7,11 +7,13 @@
 /// winning probability and reward percentage. The creator can withdraw the remaining balance after the epoch is over.
 ///
 /// Anyone can play the game by betting on X SUIs. They win X * 'reward percentage' with probability 'winning
-/// probability' and otherwise loss X SUIs.
+/// probability' and otherwise loss the X SUIs.
 ///
 module games::betting_game {
+    use sui::hanger::{Self, Hanger};
     use sui::balance::{Self, Balance};
     use sui::coin::{Self, Coin};
+    use sui::math;
     use sui::object::{Self, UID};
     use sui::random::{Self, Random, new_generator};
     use sui::sui::SUI;
@@ -30,7 +32,7 @@ module games::betting_game {
         id: UID,
         creator: address,
         epoch: u64,
-        balance: Balance<SUI>,
+        balance: Balance<SUI>, // Must not be exposed externally.
         winning_probability: u8,
         reward_percentage: u8,
     }
@@ -46,18 +48,19 @@ module games::betting_game {
         assert!(amount > 0, EInvalidAmount);
         assert!(winning_probability > 0 && winning_probability < 100, EInvalidWinProb);
         assert!(reward_percentage > 0 && reward_percentage < 100, EInvalidRewardPrec);
-        transfer::share_object(Game {
+        transfer::public_share_object(hanger::create(Game {
             id: object::new(ctx),
             creator: tx_context::sender(ctx),
             epoch: tx_context::epoch(ctx),
             balance: coin::into_balance(reward),
             winning_probability,
             reward_percentage,
-        });
+        }, ctx));
     }
 
     /// Creator can withdraw remaining balance if the game is over.
-    public fun close(game: &mut Game, ctx: &mut TxContext): Coin<SUI> {
+    public fun close(game: &mut Hanger<Game>, ctx: &mut TxContext): Coin<SUI> {
+        let game = hanger::load_data_mut(game);
         assert!(tx_context::epoch(ctx) > game.epoch, EInvalidEpoch);
         assert!(tx_context::sender(ctx) == game.creator, EInvalidSender);
         let full_balance = balance::value(&game.balance);
@@ -68,30 +71,44 @@ module games::betting_game {
     ///
     /// The function does not return anything to the caller to make sure its output cannot be used in later PTB
     /// commands.
-    entry fun play(game: &mut Game, r: &Random, coin: Coin<SUI>, ctx: &mut TxContext) {
+    /// In addition, the function follows the same steps whether the user won or lost to make sure the gas consumption
+    /// is different.
+    ///
+    /// TODO: validate in tests
+    public fun play(game: &mut Hanger<Game>, r: &Random, coin: Coin<SUI>, ctx: &mut TxContext) {
+        let game = hanger::load_data_mut(game);
         assert!(tx_context::epoch(ctx) == game.epoch, EInvalidEpoch);
-        assert!(coin::value(&coin) > 0 && balance::value(&game.balance) >= coin::value(&coin), EInvalidAmount);
+        assert!(coin::value(&coin) > 0, EInvalidAmount);
+
+        let bet = math::min(coin::value(&coin), balance::value(&game.balance));
+        // Make sure every bet counts.
+        let reward = (bet * (game.reward_percentage as u64)) / 100;
+        reward = if (reward == 0) { bet } else { reward };
+        // If lost, return the rest to the user.
+        let amount_lost = coin::value(&coin) - bet;
+        // If won, return entire input balance and the reward to the user.
+        let amount_won = amount_lost + bet + reward;
+        coin::put(&mut game.balance, coin);
 
         let generator = new_generator(r, ctx);
         let bet = random::generate_u8_in_range(&mut generator, 1, 100);
         let won = bet <= game.winning_probability;
-        if (won) {
-            let amount = (coin::value(&coin) * (game.reward_percentage as u64)) / 100;
-            let all_coins = coin::take(&mut game.balance, amount, ctx);
-            coin::join(&mut all_coins, coin);
-            transfer::public_transfer(all_coins, tx_context::sender(ctx));
-        } else {
-            coin::put(&mut game.balance, coin);
-        };
+
+        let amount = if (won) { amount_won } else { amount_lost };
+        let to_user_coin = coin::take(&mut game.balance, amount, ctx);
+        transfer::public_transfer(to_user_coin, tx_context::sender(ctx));
     }
 
     #[test_only]
-    public fun get_balance(game: &Game): u64 {
+    public fun get_balance(game: &Hanger<Game>): u64 {
+        let game = hanger::load_data(game);
         balance::value(&game.balance)
     }
 
     #[test_only]
-    public fun get_epoch(game: &Game): u64 {
+    public fun get_epoch(game: &Hanger<Game>): u64 {
+        let game = hanger::load_data(game);
         game.epoch
     }
+
 }
