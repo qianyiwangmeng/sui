@@ -25,9 +25,17 @@ module sui::bridge {
     use sui::hex;
     #[test_only]
     use sui::test_scenario;
+    use sui::versioned::Versioned;
+    use sui::versioned;
 
     struct Bridge has key {
         id: UID,
+        inner: Versioned
+    }
+
+    struct BridgeInner has store {
+        version: u64,
+
         // nonce for replay protection
         sequence_num: u64,
         // committee pub keys
@@ -38,16 +46,17 @@ module sui::bridge {
         treasury: BridgeTreasury,
         pending_messages: Table<BridgeMessageKey, BridgeMessage>,
         approved_messages: Table<BridgeMessageKey, ApprovedBridgeMessage>,
-        freezed: bool,
+        frozen: bool,
         last_emergency_op_seq_num: u64,
     }
 
     // message types
-    const EMERGENCY_OP: u8 = 0;
+    const TOKEN: u8 = 0;
     const COMMITTEE_BLOCKLIST: u8 = 1;
-    const COMMITTEE_CHANGE: u8 = 2;
-    const TOKEN: u8 = 3;
-    const NFT: u8 = 4;
+    const EMERGENCY_OP: u8 = 2;
+
+    //const COMMITTEE_CHANGE: u8 = 2;
+    //const NFT: u8 = 4;
 
     // Emergency Op types
     const FREEZE: u8 = 0;
@@ -97,22 +106,54 @@ module sui::bridge {
     const EUnexpectedChainID: u64 = 4;
     const ENotSystemAddress: u64 = 5;
     const EUnexpectedSeqNum: u64 = 6;
+    const EWrongInnerVersion: u64 = 7;
+
+    const CURRENT_VERSION: u64 = 1;
 
     #[allow(unused_function)]
     fun create(ctx: &mut TxContext) {
         assert!(tx_context::sender(ctx) == @0x0, ENotSystemAddress);
-        let bridge = Bridge {
-            id: object::bridge(),
+        let bridge_inner = BridgeInner {
+            version: CURRENT_VERSION,
             sequence_num: 0,
             committee: bridge_committee::create_genesis_static_committee(),
             escrow: bridge_escrow::create(ctx),
             treasury: bridge_treasury::create(ctx),
             pending_messages: table::new<BridgeMessageKey, BridgeMessage>(ctx),
             approved_messages: table::new<BridgeMessageKey, ApprovedBridgeMessage>(ctx),
-            freezed: false,
+            frozen: false,
             last_emergency_op_seq_num: 0
         };
+        let bridge = Bridge{
+            id: object::bridge(),
+            inner : versioned::create(CURRENT_VERSION, bridge_inner, ctx)
+        };
         transfer::share_object(bridge)
+    }
+
+    fun load_inner_mut(
+        self: &mut Bridge,
+    ): &mut BridgeInner {
+        let version = versioned::version(&self.inner);
+
+        // Replace this with a lazy update function when we add a new version of the inner object.
+        assert!(version == CURRENT_VERSION, EWrongInnerVersion);
+        let inner: &mut BridgeInner = versioned::load_value_mut(&mut self.inner);
+        assert!(inner.version == version, EWrongInnerVersion);
+        inner
+    }
+
+    #[allow(unused_function)] // TODO: remove annotation after implementing user-facing API
+    fun load_inner(
+        self: &Bridge,
+    ): &BridgeInner {
+        let version = versioned::version(&self.inner);
+
+        // Replace this with a lazy update function when we add a new version of the inner object.
+        assert!(version == CURRENT_VERSION, EWrongInnerVersion);
+        let inner: &BridgeInner = versioned::load_value(&self.inner);
+        assert!(inner.version == version, EWrongInnerVersion);
+        inner
     }
 
     fun serialise_token_bridge_payload<T>(
@@ -190,8 +231,9 @@ module sui::bridge {
         token: Coin<T>,
         ctx: &mut TxContext
     ) {
-        let bridge_seq_num = self.sequence_num;
-        self.sequence_num = self.sequence_num + 1;
+        let inner = load_inner_mut(self);
+        let bridge_seq_num = inner.sequence_num;
+        inner.sequence_num = inner.sequence_num + 1;
         // create bridge message
         let payload = serialise_token_bridge_payload(tx_context::sender(ctx),target_chain, target_address, &token);
         let message = BridgeMessage {
@@ -203,13 +245,13 @@ module sui::bridge {
         };
         // burn / escrow token
         if (bridge_treasury::is_bridged_token<T>()) {
-            bridge_treasury::burn(&mut self.treasury, token);
+            bridge_treasury::burn(&mut inner.treasury, token);
         }else {
-            bridge_escrow::escrow_token(&mut self.escrow, token);
+            bridge_escrow::escrow_token(&mut inner.escrow, token);
         };
         // Store pending bridge request
         let key = BridgeMessageKey { source_chain: chain_ids::sui(), bridge_seq_num };
-        table::add(&mut self.pending_messages, key, message);
+        table::add(&mut inner.pending_messages, key, message);
 
         // emit event
         // TODO: Approvals for bridge to other chains will not be consummed because claim happens on other chain, we need to archieve old approvals on Sui.
@@ -223,13 +265,14 @@ module sui::bridge {
         signatures: vector<vector<u8>>,
         ctx: &TxContext
     ) {
+        let inner = load_inner_mut(self);
         // varify signatures
-        bridge_committee::verify_signatures(&self.committee, raw_message, signatures);
+        bridge_committee::verify_signatures(&inner.committee, raw_message, signatures);
         let message = deserialise_message(raw_message);
         // retrieve pending message if source chain is Sui
         if (message.source_chain == chain_ids::sui()) {
             let key = BridgeMessageKey { source_chain: chain_ids::sui(), bridge_seq_num: message.seq_num };
-            let recorded_message = table::remove(&mut self.pending_messages,key);
+            let recorded_message = table::remove(&mut inner.pending_messages,key);
             let message_bytes = serialise_message(recorded_message);
             assert!(message_bytes == raw_message, EMalformedMessageError);
         };
@@ -241,7 +284,7 @@ module sui::bridge {
         };
         let key = BridgeMessageKey { source_chain: message.source_chain, bridge_seq_num: message.seq_num };
         // Store approval
-        table::add(&mut self.approved_messages, key, approved_message);
+        table::add(&mut inner.approved_messages, key, approved_message);
     }
 
     // Claim token from approved bridge message
@@ -251,13 +294,14 @@ module sui::bridge {
         bridge_seq_num: u64,
         ctx: &mut TxContext
     ): (Coin<T>, address) {
+        let inner = load_inner_mut(self);
         let key = BridgeMessageKey { source_chain, bridge_seq_num };
         // retrieve approved bridge message
         let ApprovedBridgeMessage {
             message,
             approved_epoch: _,
             signatures: _,
-        } = table::remove(&mut self.approved_messages, key);
+        } = table::remove(&mut inner.approved_messages, key);
 
         // extract token message
         let TokenBridgePayload {
@@ -278,9 +322,9 @@ module sui::bridge {
         assert!(bridge_treasury::token_id<T>() == token_type, EUnexpectedTokenType);
         // claim from escrow or treasury
         let token = if (bridge_treasury::is_bridged_token<T>()) {
-            bridge_treasury::mint<T>(&mut self.treasury, amount, ctx)
+            bridge_treasury::mint<T>(&mut inner.treasury, amount, ctx)
         }else {
-            bridge_escrow::claim_token(&mut self.escrow, amount, ctx)
+            bridge_escrow::claim_token(&mut inner.escrow, amount, ctx)
         };
         (token, owner)
     }
@@ -309,21 +353,22 @@ module sui::bridge {
         emergency_op_message: vector<u8>,
         signatures: vector<vector<u8>>
     ) {
-        bridge_committee::verify_signatures(&self.committee,emergency_op_message,signatures);
+        let inner = load_inner_mut(self);
+        bridge_committee::verify_signatures(&inner.committee,emergency_op_message,signatures);
         let message = deserialise_message(emergency_op_message);
         assert!(message.message_type == EMERGENCY_OP, EUnexpectedMessageType);
         // check emergency ops seq number
-        assert!(message.seq_num == self.last_emergency_op_seq_num + 1, EUnexpectedSeqNum);
+        assert!(message.seq_num == inner.last_emergency_op_seq_num + 1, EUnexpectedSeqNum);
         let EmergencyOpPayload { op_type } = deserialise_emergency_op_payload(message.payload);
 
         if (op_type == FREEZE) {
-            self.freezed == true;
+            inner.frozen == true;
         }else if (op_type == UNFREEZE) {
-            self.freezed == false;
+            inner.frozen == false;
         }else {
             abort 0
         };
-        self.last_emergency_op_seq_num = message.seq_num;
+        inner.last_emergency_op_seq_num = message.seq_num;
     }
 
     #[test]
