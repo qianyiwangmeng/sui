@@ -29,6 +29,7 @@ module games::lottery {
     const EInvalidAmount: u64 = 3;
     const EGameMistmatch: u64 = 4;
     const ENotWinner: u64 = 4;
+    const EWrongGameWinner: u64 = 5;
 
     /// Game represents a set of parameters of a single game.
     struct Game has key {
@@ -36,8 +37,13 @@ module games::lottery {
         cost_in_sui: u64,
         participants: u32,
         end_time: u64,
-        winner: Option<u32>,
+        winner_obj: Option<ID>,
         balance: Balance<SUI>,
+    }
+
+    struct GameWinner has key {
+        id: UID,
+        winner: u32,
     }
 
     /// Ticket represents a participant in a single game.
@@ -59,19 +65,20 @@ module games::lottery {
             cost_in_sui,
             participants: 0,
             end_time,
-            winner: option::none(),
+            winner_obj: option::none(),
             balance: balance::zero(),
         };
         transfer::share_object(game);
     }
 
     /// Anyone can determine a winner.
+    ///
     /// Since clock is somewhat controlled by validators, we use a 2-step process to guarantee that once
     /// 'determine_winner' is called, the game is indeed over. (If instead we used Clock in 'determine_winner', a
     /// malicious validator could send a transaction before 'end_time', wait for its randomness, and then decide if
     /// to set Clock so that the transaction would fail or not depending on the winner.)
-    /// Instead, here, a user must first retrieve a capability to prove that the game is over. This capability is
-    /// returned as a new, transferred object, thus cannot be used atomically with 'determine_winner'. This guarantees
+    /// Here, a user must first retrieve a capability to prove that the game is over. This capability is returned
+    /// as a new, transferred object, thus cannot be used atomically with 'determine_winner'. This guarantees
     /// that transactions that call 'determine_winner' are committed after the game is over.
     entry fun get_determine_winner_capability(game: &Game, clock: &Clock, ctx: &mut TxContext) {
         assert!(game.end_time <= clock::timestamp_ms(clock), EGameInProgress);
@@ -84,13 +91,20 @@ module games::lottery {
             tx_context::sender(ctx));
     }
 
+    /// The winner is determined randomly and stored in an newly created, id-linked shared object GameWinner.
+    /// Since GameWinner is a new object, we do not worry about other commands using it in the same PTB.
     entry fun determine_winner(cap: DetermineWinnerCapability, game: &mut Game, r: &Random, ctx: &mut TxContext) {
-        assert!(option::is_none(&game.winner), EGameAlreadyCompleted);
+        assert!(option::is_none(&game.winner_obj), EGameAlreadyCompleted);
         assert!(object::id(game) == cap.game_id, EGameMistmatch);
         destroy_detemine_winner_capability(cap);
         let generator = new_generator(r, ctx);
         let winner = random::generate_u32_in_range(&mut generator, 1, game.participants);
-        game.winner = option::some(winner);
+        let game_winner = GameWinner {
+            id: object::new(ctx),
+            winner,
+        };
+        game.winner_obj = option::some(object::id(&game_winner));
+        transfer::share_object(game_winner);
     }
 
     /// Anyone can play and receive a ticket.
@@ -109,9 +123,10 @@ module games::lottery {
     }
 
     /// The winner can take the prize.
-    public fun redeem(ticket: Ticket, game: &mut Game, ctx: &mut TxContext): Coin<SUI> {
+    public fun redeem(ticket: Ticket, game: &mut Game, winner: &GameWinner, ctx: &mut TxContext): Coin<SUI> {
         assert!(object::id(game) == ticket.game_id, EGameMistmatch);
-        assert!(option::contains(&game.winner, &ticket.participant_index), ENotWinner);
+        assert!(option::contains(&game.winner_obj, &object::id(winner)), EWrongGameWinner);
+        assert!(winner.winner == ticket.participant_index, ENotWinner);
         destroy_ticket(ticket);
 
         let full_balance = balance::value(&game.balance);
@@ -144,12 +159,17 @@ module games::lottery {
     }
 
     #[test_only]
-    public fun get_winner(game: &Game): Option<u32> {
-        game.winner
+    public fun get_winner_obj(game: &Game): Option<ID> {
+        game.winner_obj
     }
 
     #[test_only]
     public fun get_balance(game: &Game): u64 {
         balance::value(&game.balance)
+    }
+
+    #[test_only]
+    public fun get_winner(gw: &GameWinner): u32 {
+        gw.winner
     }
 }

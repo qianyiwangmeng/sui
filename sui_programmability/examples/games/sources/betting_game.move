@@ -28,7 +28,7 @@ module games::betting_game {
     const EInvalidEpoch: u64 = 3;
 
     /// Game for a specific epoch.
-    struct Game has key {
+    struct Game has key, store {
         id: UID,
         creator: address,
         epoch: u64,

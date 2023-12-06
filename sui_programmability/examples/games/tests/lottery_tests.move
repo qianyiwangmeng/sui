@@ -48,7 +48,7 @@ module games::lottery_tests {
         assert!(lottery::get_cost_in_sui(&game) == 10, 1);
         assert!(lottery::get_participants(&game) == 0, 1);
         assert!(lottery::get_end_time(&game) == end_time, 1);
-        assert!(lottery::get_winner(&game) == option::none(), 1);
+        assert!(lottery::get_winner_obj(&game) == option::none(), 1);
         assert!(lottery::get_balance(&game) == 0, 1);
 
         let clock = clock::create_for_testing(test_scenario::ctx(scenario));
@@ -89,15 +89,17 @@ module games::lottery_tests {
         test_scenario::next_tx(scenario, user4);
         let cap = test_scenario::take_from_sender<lottery::DetermineWinnerCapability>(scenario);
         lottery::determine_winner(cap, &mut game, &random_state, test_scenario::ctx(scenario));
-        assert!(lottery::get_winner(&game) == option::some(3), 1);
+        test_scenario::next_tx(scenario, user4);
+        let winner = test_scenario::take_shared<lottery::GameWinner>(scenario);
+        assert!(lottery::get_winner(&winner) == 3, 1);
         assert!(lottery::get_balance(&game) == 40, 1);
 
         // Take the winnings
-        test_scenario::next_tx(scenario, user3);
-        let coin = lottery::redeem(t3, &mut game, test_scenario::ctx(scenario));
+        let coin = lottery::redeem(t3, &mut game, &winner, test_scenario::ctx(scenario));
         assert!(coin::value(&coin) == 40, 1);
         coin::burn_for_testing(coin);
 
+        test_scenario::return_shared(winner);
         clock::destroy_for_testing(clock);
         test_scenario::return_shared(game);
         test_scenario::return_shared(random_state);
