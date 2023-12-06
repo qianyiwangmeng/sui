@@ -15,7 +15,6 @@ module sui::bridge {
     use sui::coin::{Self, Coin};
     use sui::event::emit;
     use sui::object::{Self, UID};
-    use sui::table::{Self, Table};
     use sui::transfer;
     use sui::tx_context::{Self, TxContext};
 
@@ -27,6 +26,8 @@ module sui::bridge {
     use sui::test_scenario;
     use sui::versioned::Versioned;
     use sui::versioned;
+    use sui::linked_table::LinkedTable;
+    use sui::linked_table;
 
     struct Bridge has key {
         id: UID,
@@ -44,8 +45,8 @@ module sui::bridge {
         escrow: BridgeEscrow,
         // Bridge treasury for mint/burn bridged tokens
         treasury: BridgeTreasury,
-        pending_messages: Table<BridgeMessageKey, BridgeMessage>,
-        approved_messages: Table<BridgeMessageKey, ApprovedBridgeMessage>,
+        pending_messages: LinkedTable<BridgeMessageKey, BridgeMessage>,
+        approved_messages: LinkedTable<BridgeMessageKey, ApprovedBridgeMessage>,
         frozen: bool,
         last_emergency_op_seq_num: u64,
     }
@@ -119,8 +120,8 @@ module sui::bridge {
             committee: bridge_committee::create_genesis_static_committee(),
             escrow: bridge_escrow::create(ctx),
             treasury: bridge_treasury::create(ctx),
-            pending_messages: table::new<BridgeMessageKey, BridgeMessage>(ctx),
-            approved_messages: table::new<BridgeMessageKey, ApprovedBridgeMessage>(ctx),
+            pending_messages: linked_table::new<BridgeMessageKey, BridgeMessage>(ctx),
+            approved_messages: linked_table::new<BridgeMessageKey, ApprovedBridgeMessage>(ctx),
             frozen: false,
             last_emergency_op_seq_num: 0
         };
@@ -251,7 +252,7 @@ module sui::bridge {
         };
         // Store pending bridge request
         let key = BridgeMessageKey { source_chain: chain_ids::sui(), bridge_seq_num };
-        table::add(&mut inner.pending_messages, key, message);
+        linked_table::push_back(&mut inner.pending_messages, key, message);
 
         // emit event
         // TODO: Approvals for bridge to other chains will not be consummed because claim happens on other chain, we need to archieve old approvals on Sui.
@@ -272,7 +273,7 @@ module sui::bridge {
         // retrieve pending message if source chain is Sui
         if (message.source_chain == chain_ids::sui()) {
             let key = BridgeMessageKey { source_chain: chain_ids::sui(), bridge_seq_num: message.seq_num };
-            let recorded_message = table::remove(&mut inner.pending_messages,key);
+            let recorded_message = linked_table::remove(&mut inner.pending_messages,key);
             let message_bytes = serialise_message(recorded_message);
             assert!(message_bytes == raw_message, EMalformedMessageError);
         };
@@ -284,7 +285,7 @@ module sui::bridge {
         };
         let key = BridgeMessageKey { source_chain: message.source_chain, bridge_seq_num: message.seq_num };
         // Store approval
-        table::add(&mut inner.approved_messages, key, approved_message);
+        linked_table::push_back(&mut inner.approved_messages, key, approved_message);
     }
 
     // Claim token from approved bridge message
@@ -301,7 +302,7 @@ module sui::bridge {
             message,
             approved_epoch: _,
             signatures: _,
-        } = table::remove(&mut inner.approved_messages, key);
+        } = linked_table::remove(&mut inner.approved_messages, key);
 
         // extract token message
         let TokenBridgePayload {
