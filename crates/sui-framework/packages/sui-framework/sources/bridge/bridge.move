@@ -14,9 +14,11 @@ module sui::bridge {
     use sui::chain_ids;
     use sui::coin::{Self, Coin};
     use sui::event::emit;
+    use sui::linked_table::{Self, LinkedTable};
     use sui::object::{Self, UID};
     use sui::transfer;
     use sui::tx_context::{Self, TxContext};
+    use sui::versioned::{Self, Versioned};
 
     #[test_only]
     use sui::bridge_treasury::USDC;
@@ -24,10 +26,6 @@ module sui::bridge {
     use sui::hex;
     #[test_only]
     use sui::test_scenario;
-    use sui::versioned::Versioned;
-    use sui::versioned;
-    use sui::linked_table::LinkedTable;
-    use sui::linked_table;
 
     struct Bridge has key {
         id: UID,
@@ -36,7 +34,6 @@ module sui::bridge {
 
     struct BridgeInner has store {
         version: u64,
-
         // nonce for replay protection
         sequence_num: u64,
         // committee pub keys
