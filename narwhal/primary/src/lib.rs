@@ -15,6 +15,7 @@ mod certifier;
 pub mod consensus;
 mod core;
 mod fetcher;
+mod getter;
 mod primary;
 mod producer;
 mod proposer;

@@ -29,6 +29,8 @@ use tokio::{
 };
 use types::FetchHeadersRequest;
 use types::FetchHeadersResponse;
+use types::GetHeadersRequest;
+use types::GetHeadersResponse;
 use types::SendHeaderRequest;
 use types::SendHeaderResponse;
 use types::{
@@ -94,6 +96,13 @@ impl PrimaryToPrimary for NetworkProxy {
         &self,
         _request: anemo::Request<FetchHeadersRequest>,
     ) -> Result<anemo::Response<FetchHeadersResponse>, anemo::rpc::Status> {
+        unimplemented!()
+    }
+
+    async fn get_headers(
+        &self,
+        _request: anemo::Request<GetHeadersRequest>,
+    ) -> Result<anemo::Response<GetHeadersResponse>, anemo::rpc::Status> {
         unimplemented!()
     }
 }

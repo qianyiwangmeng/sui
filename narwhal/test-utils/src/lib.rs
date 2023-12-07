@@ -38,12 +38,12 @@ use tracing::info;
 use types::{
     Batch, BatchDigest, BatchV1, Certificate, CertificateAPI, CertificateDigest,
     FetchBatchesRequest, FetchBatchesResponse, FetchCertificatesRequest, FetchCertificatesResponse,
-    FetchHeadersRequest, FetchHeadersResponse, Header, HeaderAPI, HeaderV2Builder,
-    PrimaryToPrimary, PrimaryToPrimaryServer, PrimaryToWorker, PrimaryToWorkerServer,
-    RequestBatchesRequest, RequestBatchesResponse, RequestVoteRequest, RequestVoteResponse, Round,
-    SendCertificateRequest, SendCertificateResponse, SendHeaderRequest, SendHeaderResponse,
-    SendRandomnessPartialSignaturesRequest, TimestampMs, Transaction, Vote, VoteAPI,
-    WorkerBatchMessage, WorkerSynchronizeMessage, WorkerToWorker, WorkerToWorkerServer,
+    FetchHeadersRequest, FetchHeadersResponse, GetHeadersRequest, GetHeadersResponse, Header,
+    HeaderAPI, HeaderV2Builder, PrimaryToPrimary, PrimaryToPrimaryServer, PrimaryToWorker,
+    PrimaryToWorkerServer, RequestBatchesRequest, RequestBatchesResponse, RequestVoteRequest,
+    RequestVoteResponse, Round, SendCertificateRequest, SendCertificateResponse, SendHeaderRequest,
+    SendHeaderResponse, SendRandomnessPartialSignaturesRequest, TimestampMs, Transaction, Vote,
+    VoteAPI, WorkerBatchMessage, WorkerSynchronizeMessage, WorkerToWorker, WorkerToWorkerServer,
 };
 
 pub mod cluster;
@@ -272,6 +272,13 @@ impl PrimaryToPrimary for PrimaryToPrimaryMockServer {
         &self,
         _request: anemo::Request<FetchHeadersRequest>,
     ) -> Result<anemo::Response<FetchHeadersResponse>, anemo::rpc::Status> {
+        unimplemented!()
+    }
+
+    async fn get_headers(
+        &self,
+        _request: anemo::Request<GetHeadersRequest>,
+    ) -> Result<anemo::Response<GetHeadersResponse>, anemo::rpc::Status> {
         unimplemented!()
     }
 }

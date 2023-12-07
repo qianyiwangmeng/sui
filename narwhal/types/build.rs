@@ -106,6 +106,15 @@ fn build_anemo_services(out_dir: &Path) {
                 .codec_path(codec_path)
                 .build(),
         )
+        .method(
+            anemo_build::manual::Method::builder()
+                .name("get_headers")
+                .route_name("GetHeaders")
+                .request_type("crate::GetHeadersRequest")
+                .response_type("crate::GetHeadersResponse")
+                .codec_path(codec_path)
+                .build(),
+        )
         .build();
 
     let primary_to_worker = anemo_build::manual::Service::builder()

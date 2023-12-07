@@ -10,7 +10,9 @@ use tokio::{sync::watch, task::JoinHandle};
 use tracing::{debug, info, warn};
 use types::{CommittedSubDag, SignedHeader};
 
-use crate::{dag_state::DagState, fetcher::HeaderFetcher, metrics::PrimaryMetrics};
+use crate::{
+    dag_state::DagState, fetcher::HeaderFetcher, getter::HeaderGetter, metrics::PrimaryMetrics,
+};
 
 /// Core runs a loop that drives the process to accept incoming headers,
 /// notify header producer, and commit in consensus when possible.
@@ -25,8 +27,10 @@ pub(crate) struct Core {
     worker_cache: WorkerCache,
     // Stores headers accepted by this primary.
     dag_state: Arc<DagState>,
-    // Fetches headers from other peers.
+    // Fetches headers from peers.
     fetcher: HeaderFetcher,
+    // Gets specific missing headers from peers.
+    getter: HeaderGetter,
     // Notifies the header producer when one or more headers are accepted.
     tx_headers_accepted: watch::Sender<()>,
     // Sends committed subdag to be prepared for consensus output.
@@ -45,6 +49,7 @@ impl Core {
         worker_cache: WorkerCache,
         dag_state: Arc<DagState>,
         fetcher: HeaderFetcher,
+        getter: HeaderGetter,
         tx_headers_accepted: watch::Sender<()>,
         tx_sequence: Sender<CommittedSubDag>,
         rx_verified_header: Receiver<SignedHeader>,
@@ -57,6 +62,7 @@ impl Core {
             worker_cache,
             dag_state,
             fetcher,
+            getter,
             tx_headers_accepted,
             tx_sequence,
             rx_verified_header,
@@ -82,14 +88,14 @@ impl Core {
                 return;
             };
 
-            debug!("Received verified header: {:?}", header);
+            debug!("Received verified header: {}", header.key());
             let mut headers = vec![header];
             while let Ok(header) = self.rx_verified_header.try_recv() {
                 self.metrics
                     .highest_received_round
                     .with_label_values(&["other"])
                     .set(header.round() as i64);
-                debug!("Received verified header without wait: {:?}", header);
+                debug!("Received verified header without wait: {}", header.key());
                 headers.push(header);
             }
 
@@ -101,7 +107,14 @@ impl Core {
                 }
             };
 
-            self.fetcher.try_start();
+            let missing = self.dag_state.missing_headers(100);
+            if !missing.is_empty() {
+                let lowest_missing_round = missing.first().unwrap().round();
+                if self.dag_state.highest_accepted_round() + 100 < lowest_missing_round {
+                    self.fetcher.try_start();
+                }
+                self.getter.get_missing(missing);
+            }
 
             if num_accepted > 0 {
                 for commit in self.dag_state.try_commit() {

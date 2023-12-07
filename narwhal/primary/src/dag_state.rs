@@ -76,6 +76,8 @@ impl DagState {
             genesis,
             persisted,
             highest_proposed_round: 0,
+            highest_received_round: 0,
+            highest_accepted_round: 0,
             pending_leaders: VecDeque::default(),
             leader_schedule,
             last_committed_sub_dag: None,
@@ -236,6 +238,15 @@ impl DagState {
             .collect())
     }
 
+    pub(crate) fn get_headers(&self, missing: Vec<HeaderKey>) -> DagResult<Vec<SignedHeader>> {
+        let inner = self.inner.lock();
+        let headers = missing
+            .iter()
+            .filter_map(|key| inner.headers.get(key).cloned())
+            .collect();
+        Ok(headers)
+    }
+
     pub(crate) fn last_round_per_authority(&self) -> BTreeMap<AuthorityIdentifier, Round> {
         let mut keys = BTreeMap::new();
         let inner = self.inner.lock();
@@ -258,9 +269,29 @@ impl DagState {
         batch.write().unwrap();
     }
 
+    pub(crate) fn highest_accepted_round(&self) -> Round {
+        let inner = self.inner.lock();
+        inner.highest_accepted_round()
+    }
+
     pub(crate) fn num_suspended(&self) -> usize {
         let inner = self.inner.lock();
         inner.suspended.len()
+    }
+
+    pub(crate) fn missing_headers(&self, limit: usize) -> Vec<HeaderKey> {
+        let mut missing = Vec::new();
+        let inner = self.inner.lock();
+        for (key, suspended) in &inner.suspended {
+            if suspended.signed_header.is_some() {
+                continue;
+            }
+            missing.push(*key);
+            if missing.len() >= limit {
+                break;
+            }
+        }
+        missing
     }
 
     /// Return true when the header is accepted, false otherwise.
@@ -275,11 +306,19 @@ impl DagState {
             debug!(key=?header_key, "try_accept_internal: already accepted.");
             return Ok(false);
         }
-        // if let Some(suspended_header) = inner.suspended.get(&key) {
-        //     if suspended_header.signed_header.is_some() {
-        //         return Ok(false);
-        //     }
-        // }
+        if let Some(suspended_header) = inner.suspended.get(&header_key) {
+            if suspended_header.signed_header.is_some() {
+                return Ok(false);
+            }
+        }
+
+        inner.highest_received_round =
+            std::cmp::max(inner.highest_received_round, header_key.round());
+        inner
+            .metrics
+            .highest_received_round
+            .with_label_values(&["unknown"])
+            .set(inner.highest_received_round as i64);
 
         let mut missing = vec![];
         let mut to_check = vec![];
@@ -332,6 +371,12 @@ impl DagState {
 
         if !missing.is_empty() {
             debug!(key=?header_key, "try_accept_internal: suspended");
+            if inner.suspended.len() > 10000
+                && header_key.round() > inner.highest_accepted_round() + 100
+            {
+                // Drop header when the suspended map becomes too large.
+                return Ok(false);
+            }
             for ancestor in &missing {
                 inner
                     .suspended
@@ -363,6 +408,14 @@ impl DagState {
 
         debug!(key=?header_key, "try_accept_internal: accepting");
         inner.accept_internal(signed_header);
+
+        inner.highest_accepted_round =
+            std::cmp::max(inner.highest_accepted_round, header_key.round());
+        inner
+            .metrics
+            .highest_processed_round
+            .with_label_values(&["unknown"])
+            .set(inner.highest_accepted_round as i64);
 
         inner
             .metrics
@@ -402,6 +455,7 @@ struct Inner {
     // An index into the `accepted` structure, to allow looking up Headers by round.
     accepted_by_round: BTreeMap<Round, HeadersByRound>,
     // Maps keys of suspended headers to the header content and remaining missing ancestors.
+    // TODO(narwhalceti): split into separate maps for suspended and missing headers.
     suspended: BTreeMap<HeaderKey, SuspendedHeader>,
     // Number of suspended headers per author.
     suspended_count: Vec<usize>,
@@ -411,6 +465,10 @@ struct Inner {
 
     // Highest round of proposed headers.
     highest_proposed_round: Round,
+    // Highest round of proposed headers.
+    highest_received_round: Round,
+    // Highest round of proposed headers.
+    highest_accepted_round: Round,
 
     // TODO(mysticeti): recover.
     // Leaders that cannot commit yet.
@@ -556,7 +614,7 @@ impl Inner {
         let mut parent_round = None;
         let mut next_check_delay = Duration::from_millis(100);
         let max_wait_threshold = Duration::from_millis(200);
-        'search: for r in (highest_proposed_round..=self.highest_known_round()).rev() {
+        'search: for r in (highest_proposed_round..=self.highest_accepted_round()).rev() {
             let headers_by_round = &self.accepted_by_round[&r];
             let Some(quorum_time) = headers_by_round.quorum_time else {
                 continue;
@@ -630,13 +688,13 @@ impl Inner {
     }
 
     fn try_commit(&mut self) -> (Vec<CommittedSubDag>, bool) {
-        if self.highest_known_round() == 0 {
+        if self.highest_accepted_round() == 0 {
             return (vec![], false);
         }
 
         // Create pending_leaders entries for potential leaders.
         for round in
-            self.highest_voting_leader_round + 1..=self.highest_known_round().saturating_sub(2)
+            self.highest_voting_leader_round + 1..=self.highest_accepted_round().saturating_sub(2)
         {
             let leaders = self.leader_schedule.leader_sequence(round);
             for leader in leaders.into_iter() {
@@ -737,7 +795,7 @@ impl Inner {
         round: Round,
         author: AuthorityIdentifier,
     ) -> LeaderSelectionStatus {
-        if round + 2 > self.highest_known_round() {
+        if round + 2 > self.highest_accepted_round() {
             return LeaderSelectionStatus::Undecided;
         }
         let headers_by_round = &self.accepted_by_round[&(round + 2)];
@@ -802,7 +860,7 @@ impl Inner {
         target_index: usize,
     ) -> LeaderSelectionStatus {
         let min_anchor_round = target_round + 3;
-        if min_anchor_round > self.highest_known_round() {
+        if min_anchor_round > self.highest_accepted_round() {
             return LeaderSelectionStatus::Undecided;
         }
 
@@ -969,7 +1027,7 @@ impl Inner {
         reputation_score
     }
 
-    fn highest_known_round(&self) -> Round {
+    fn highest_accepted_round(&self) -> Round {
         self.accepted_by_round
             .last_key_value()
             .map(|(r, _)| *r)

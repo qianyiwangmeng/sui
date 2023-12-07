@@ -10,6 +10,7 @@ use crate::{
     core::Core,
     dag_state::DagState,
     fetcher::HeaderFetcher,
+    getter::HeaderGetter,
     metrics::{initialise_metrics, PrimaryMetrics},
     producer::Producer,
     proposer::{OurDigestMessage, Proposer},
@@ -85,10 +86,10 @@ use types::{
     error::{DagError, DagResult},
     now, validate_received_certificate_version, Certificate, CertificateAPI, CertificateDigest,
     CommittedSubDag, FetchCertificatesRequest, FetchCertificatesResponse, FetchHeadersRequest,
-    FetchHeadersResponse, Header, HeaderAPI, HeaderValidationResult, MetadataAPI,
-    PreSubscribedBroadcastSender, PrimaryToPrimary, PrimaryToPrimaryServer, RandomnessRound,
-    RequestVoteRequest, RequestVoteResponse, Round, SendCertificateRequest,
-    SendCertificateResponse, SendHeaderRequest, SendHeaderResponse,
+    FetchHeadersResponse, GetHeadersRequest, GetHeadersResponse, Header, HeaderAPI,
+    HeaderValidationResult, MetadataAPI, PreSubscribedBroadcastSender, PrimaryToPrimary,
+    PrimaryToPrimaryServer, RandomnessRound, RequestVoteRequest, RequestVoteResponse, Round,
+    SendCertificateRequest, SendCertificateResponse, SendHeaderRequest, SendHeaderResponse,
     SendRandomnessPartialSignaturesRequest, SystemMessage, Vote, VoteInfoAPI,
     WorkerOthersBatchMessage, WorkerOwnBatchMessage, WorkerToPrimary, WorkerToPrimaryServer,
 };
@@ -935,6 +936,15 @@ impl Primary {
             node_metrics.clone(),
         );
 
+        let getter = HeaderGetter::new(
+            authority.id(),
+            committee.clone(),
+            network.clone(),
+            verifier.load_full().unwrap(),
+            tx_verified_headers.clone(),
+            node_metrics.clone(),
+        );
+
         let core = Core::new(
             authority.id(),
             committee.clone(),
@@ -942,6 +952,7 @@ impl Primary {
             worker_cache.clone(),
             dag_state.clone(),
             fetcher,
+            getter,
             tx_headers_accepted,
             tx_sequence,
             rx_verified_headers,
@@ -1603,7 +1614,17 @@ impl PrimaryToPrimary for PrimaryReceiverHandler {
     ) -> Result<anemo::Response<FetchHeadersResponse>, anemo::rpc::Status> {
         Err(anemo::rpc::Status::new_with_message(
             StatusCode::NotFound,
-            "fetch_header unimplemented",
+            "fetch_headers unimplemented",
+        ))
+    }
+
+    async fn get_headers(
+        &self,
+        _request: anemo::Request<GetHeadersRequest>,
+    ) -> Result<anemo::Response<GetHeadersResponse>, anemo::rpc::Status> {
+        Err(anemo::rpc::Status::new_with_message(
+            StatusCode::NotFound,
+            "get_headers unimplemented",
         ))
     }
 }
@@ -1717,6 +1738,20 @@ impl PrimaryToPrimary for PrimaryToPrimaryHandler {
         // The requestor should be able to process certificates returned in this order without
         // any missing parents.
         Ok(anemo::Response::new(response))
+    }
+
+    async fn get_headers(
+        &self,
+        request: anemo::Request<GetHeadersRequest>,
+    ) -> Result<anemo::Response<GetHeadersResponse>, anemo::rpc::Status> {
+        let request = request.into_body();
+
+        let headers = self
+            .dag_state
+            .get_headers(request.missing)
+            .map_err(|e| anemo::rpc::Status::from_error(Box::new(e)))?;
+
+        Ok(anemo::Response::new(GetHeadersResponse { headers }))
     }
 }
 

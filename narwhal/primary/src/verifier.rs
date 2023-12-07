@@ -138,7 +138,7 @@ impl Verifier {
                 client
                     .synchronize(worker_name, message)
                     .await
-                    .map_err(|e| DagError::ShuttingDown)?;
+                    .map_err(|_| DagError::ShuttingDown)?;
                 for digest in &digests {
                     self.payload_store
                         .write(digest, &worker_id)
