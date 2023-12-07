@@ -289,6 +289,8 @@ impl Worker {
 
         let batch_fetcher = BatchFetcher::new(
             worker_name,
+            worker.id,
+            worker.worker_cache.clone(),
             network.clone(),
             worker.store.clone(),
             node_metrics.clone(),

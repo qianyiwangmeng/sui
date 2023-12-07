@@ -629,13 +629,13 @@ impl Primary {
             &primary_channel_metrics.tx_committed_certificates,
             &primary_channel_metrics.tx_committed_certificates_total,
         );
-        let (tx_randomness_partial_signatures, rx_randomness_partial_signatures) =
+        let (_tx_randomness_partial_signatures, rx_randomness_partial_signatures) =
             channel_with_total(
                 CHANNEL_CAPACITY,
                 &primary_channel_metrics.tx_randomness_partial_signatures,
                 &primary_channel_metrics.tx_randomness_partial_signatures_total,
             );
-        let (tx_narwhal_round_updates, rx_narwhal_round_updates) = watch::channel(0u64);
+        let (_tx_narwhal_round_updates, rx_narwhal_round_updates) = watch::channel(0u64);
 
         // Convert authority private key into key used for random beacon.
         let randomness_private_key = fastcrypto::groups::bls12381::Scalar::from_byte_array(
