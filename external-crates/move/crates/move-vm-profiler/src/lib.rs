@@ -1,6 +1,5 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
-
 use move_vm_config::runtime::VMProfilerConfig;
 #[cfg(feature = "gas-profiler")]
 use move_vm_config::runtime::DEFAULT_PROFILE_OUTPUT_PATH;
@@ -332,4 +331,18 @@ macro_rules! profile_dump_file {
         #[cfg(feature = "gas-profiler")]
         $profiler.to_file()
     };
+}
+
+#[cfg(feature = "gas-profiler")]
+#[macro_export]
+macro_rules! gas_profiler_feature {
+    ($($tt:tt)*) => {
+        $($tt)*
+    };
+}
+
+#[cfg(not(feature = "gas-profiler"))]
+#[macro_export]
+macro_rules! gas_profiler_feature {
+    ( $( $tt:tt )* ) => {};
 }

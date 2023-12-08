@@ -12366,6 +12366,7 @@ dependencies = [
  "futures",
  "git-version",
  "humantime",
+ "move-vm-profiler",
  "mysten-common",
  "mysten-metrics",
  "mysten-network",
