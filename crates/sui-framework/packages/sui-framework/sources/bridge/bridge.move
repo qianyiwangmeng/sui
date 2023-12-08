@@ -105,6 +105,7 @@ module sui::bridge {
     const EWrongInnerVersion: u64 = 7;
 
     const CURRENT_VERSION: u64 = 1;
+    const CURRENT_MESSAGE_VERSION: u8 = 1;
 
     #[allow(unused_function)]
     fun create(ctx: &mut TxContext) {
@@ -152,18 +153,19 @@ module sui::bridge {
         inner
     }
 
-    fun serialise_token_bridge_payload<T>(
-        sender: address,
+    fun serialise_token_bridge_payload(
+        sender: vector<u8>,
         target_chain: u8,
         target_address: vector<u8>,
-        token: &Coin<T>
+        token_id: u8,
+        amount: u64,
     ): vector<u8> {
         let payload = vector[];
-        vector::append(&mut payload, bcs::to_bytes(&address::to_bytes(sender)));
+        vector::append(&mut payload, bcs::to_bytes(&sender));
         vector::push_back(&mut payload, target_chain);
         vector::append(&mut payload, bcs::to_bytes(&target_address));
-        vector::append(&mut payload, bcs::to_bytes(&token_id<T>()));
-        vector::append(&mut payload, bcs::to_bytes(&balance::value(coin::balance(token))));
+        vector::append(&mut payload, bcs::to_bytes(&token_id));
+        vector::append(&mut payload, bcs::to_bytes(&amount));
         payload
     }
 
@@ -187,17 +189,6 @@ module sui::bridge {
         let bcs = bcs::new(message);
         EmergencyOpPayload {
             op_type: bcs::peel_u8(&mut bcs)
-        }
-    }
-
-    fun deserialise_message(message: vector<u8>): BridgeMessage {
-        let bcs = bcs::new(message);
-        BridgeMessage {
-            message_type: bcs::peel_u8(&mut bcs),
-            message_version: bcs::peel_u8(&mut bcs),
-            seq_num: bcs::peel_u64(&mut bcs),
-            source_chain: bcs::peel_u8(&mut bcs),
-            payload: bcs::into_remainder_bytes(bcs)
         }
     }
 
@@ -232,7 +223,13 @@ module sui::bridge {
         let bridge_seq_num = inner.sequence_num;
         inner.sequence_num = inner.sequence_num + 1;
         // create bridge message
-        let payload = serialise_token_bridge_payload(tx_context::sender(ctx),target_chain, target_address, &token);
+        let payload = serialise_token_bridge_payload(
+            address::to_bytes(tx_context::sender(ctx)),
+            target_chain,
+            target_address,
+            token_id<T>(),
+            balance::value(coin::balance(&token))
+        );
         let message = BridgeMessage {
             message_type: TOKEN,
             message_version: 1,
@@ -255,17 +252,53 @@ module sui::bridge {
         emit(BridgeEvent { message, message_bytes: serialise_message(message) })
     }
 
+    public fun create_token_bridge_message(
+        source_chain: u8,
+        seq_num: u64,
+        sender: vector<u8>,
+        target_chain: u8,
+        target_address: vector<u8>,
+        token_id: u8,
+        amount: u64
+    ): BridgeMessage {
+        BridgeMessage {
+            message_type: TOKEN,
+            message_version: CURRENT_MESSAGE_VERSION,
+            seq_num,
+            source_chain,
+            payload: serialise_token_bridge_payload(sender, target_chain, target_address, token_id, amount)
+        }
+    }
+
+    public fun create_emergency_op_message(
+        source_chain: u8,
+        seq_num: u64,
+        sender: vector<u8>,
+        target_chain: u8,
+        target_address: vector<u8>,
+        token_id: u8,
+        amount: u64
+    ): BridgeMessage {
+        BridgeMessage {
+            message_type: EMERGENCY_OP,
+            message_version: CURRENT_MESSAGE_VERSION,
+            seq_num,
+            source_chain,
+            payload: serialise_token_bridge_payload(sender, target_chain, target_address, token_id, amount)
+        }
+    }
+
     // Record bridge message approvels in Sui, call by the bridge client
     public fun approve_bridge_message(
         self: &mut Bridge,
-        raw_message: vector<u8>,
+        message: BridgeMessage,
         signatures: vector<vector<u8>>,
         ctx: &TxContext
     ) {
         let inner = load_inner_mut(self);
         // varify signatures
+        let raw_message = serialise_message(message);
         bridge_committee::verify_signatures(&inner.committee, raw_message, signatures);
-        let message = deserialise_message(raw_message);
         // retrieve pending message if source chain is Sui
         if (message.source_chain == chain_ids::sui()) {
             let key = BridgeMessageKey { source_chain: chain_ids::sui(), bridge_seq_num: message.seq_num };
@@ -347,15 +380,14 @@ module sui::bridge {
 
     public fun execute_emergency_op(
         self: &mut Bridge,
-        emergency_op_message: vector<u8>,
+        message: BridgeMessage,
         signatures: vector<vector<u8>>
     ) {
-        let inner = load_inner_mut(self);
-        bridge_committee::verify_signatures(&inner.committee,emergency_op_message,signatures);
-        let message = deserialise_message(emergency_op_message);
         assert!(message.message_type == EMERGENCY_OP, EUnexpectedMessageType);
+        let inner = load_inner_mut(self);
         // check emergency ops seq number
         assert!(message.seq_num == inner.last_emergency_op_seq_num + 1, EUnexpectedSeqNum);
+        bridge_committee::verify_signatures(&inner.committee,serialise_message(message),signatures);
         let EmergencyOpPayload { op_type } = deserialise_emergency_op_payload(message.payload);
 
         if (op_type == FREEZE) {
@@ -382,10 +414,11 @@ module sui::bridge {
             source_chain: chain_ids::sui(),
             seq_num: 10,
             payload: serialise_token_bridge_payload(
-                sender_address,
+                address::to_bytes(sender_address),
                 chain_ids::eth(),
                 address::to_bytes(address::from_u256(200)),
-                &coin
+                token_id<USDC>(),
+                balance::value(coin::balance(&coin))
             )
         };
 
@@ -395,9 +428,6 @@ module sui::bridge {
         );
 
         assert!(message == expected_msg, 0);
-
-        let deserialised = deserialise_message(message);
-        assert!(token_bridge_message == deserialised, 0);
 
         coin::burn_for_testing(coin);
         test_scenario::end(scenario);
