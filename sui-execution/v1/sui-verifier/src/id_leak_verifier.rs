@@ -36,7 +36,7 @@ use sui_types::{
     error::{ExecutionError, VMMVerifierErrorSubStatusCode},
     id::OBJECT_MODULE_NAME,
     sui_system_state::SUI_SYSTEM_MODULE_NAME,
-    SUI_FRAMEWORK_ADDRESS, SUI_SYSTEM_ADDRESS,
+    BRIDGE_ADDRESS, SUI_FRAMEWORK_ADDRESS, SUI_SYSTEM_ADDRESS,
 };
 
 use crate::{
@@ -84,11 +84,8 @@ const SUI_AUTHENTICATOR_STATE_CREATE: FunctionIdent = (
     AUTHENTICATOR_STATE_MODULE_NAME,
     ident_str!("create"),
 );
-const SUI_BRIDGE_CREATE: FunctionIdent = (
-    &SUI_FRAMEWORK_ADDRESS,
-    BRIDGE_MODULE_NAME,
-    ident_str!("create"),
-);
+const SUI_BRIDGE_CREATE: FunctionIdent =
+    (&BRIDGE_ADDRESS, BRIDGE_MODULE_NAME, ident_str!("create"));
 const FRESH_ID_FUNCTIONS: &[FunctionIdent] = &[OBJECT_NEW, OBJECT_NEW_UID_FROM_HASH, TS_NEW_OBJECT];
 const FUNCTIONS_TO_SKIP: &[FunctionIdent] = &[
     SUI_SYSTEM_CREATE,

@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #[allow(unused_use)]
-module sui::bridge_committee {
+module bridge::committee {
     use std::vector;
 
     use sui::ecdsa_k1;
     use sui::vec_map::{Self, VecMap};
 
-    friend sui::bridge;
+    friend bridge::bridge;
 
     const ESignatureBelowThreshold: u64 = 0;
 

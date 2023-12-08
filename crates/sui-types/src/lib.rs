@@ -102,6 +102,11 @@ pub const SUI_SYSTEM_PACKAGE_ID: ObjectID = ObjectID::from_address(SUI_SYSTEM_AD
 pub const DEEPBOOK_ADDRESS: AccountAddress = deepbook_addr();
 pub const DEEPBOOK_PACKAGE_ID: ObjectID = ObjectID::from_address(DEEPBOOK_ADDRESS);
 
+/// 0xb-- account address where Bridge modules are stored
+/// Same as the ObjectID
+pub const BRIDGE_ADDRESS: AccountAddress = address_from_single_byte(11);
+pub const BRIDGE_PACKAGE_ID: ObjectID = ObjectID::from_address(BRIDGE_ADDRESS);
+
 /// 0x5: hardcoded object ID for the singleton sui system state object.
 pub const SUI_SYSTEM_STATE_ADDRESS: AccountAddress = address_from_single_byte(5);
 pub const SUI_SYSTEM_STATE_OBJECT_ID: ObjectID = ObjectID::from_address(SUI_SYSTEM_STATE_ADDRESS);

@@ -40,7 +40,7 @@ use sui_types::{
 #[cfg(msim)]
 use sui_types::{
     authenticator_state::AUTHENTICATOR_STATE_MODULE_NAME, bridge::BRIDGE_MODULE_NAME,
-    randomness_state::RANDOMNESS_MODULE_NAME,
+    randomness_state::RANDOMNESS_MODULE_NAME, BRIDGE_ADDRESS,
 };
 
 use crate::{
@@ -102,11 +102,8 @@ const SUI_RANDOMNESS_STATE_CREATE: FunctionIdent = (
 );
 
 #[cfg(msim)]
-const SUI_BRIDGE_CREATE: FunctionIdent = (
-    &SUI_FRAMEWORK_ADDRESS,
-    BRIDGE_MODULE_NAME,
-    ident_str!("create"),
-);
+const SUI_BRIDGE_CREATE: FunctionIdent =
+    (&BRIDGE_ADDRESS, BRIDGE_MODULE_NAME, ident_str!("create"));
 
 const FRESH_ID_FUNCTIONS: &[FunctionIdent] = &[OBJECT_NEW, OBJECT_NEW_UID_FROM_HASH, TS_NEW_OBJECT];
 #[cfg(not(msim))]

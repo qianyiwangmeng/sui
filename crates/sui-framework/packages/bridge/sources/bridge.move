@@ -2,26 +2,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #[allow(unused_const)]
-module sui::bridge {
+module bridge::bridge {
     use std::vector;
 
     use sui::address;
     use sui::balance;
     use sui::bcs;
-    use sui::bridge_committee::{Self, BridgeCommittee};
-    use sui::bridge_escrow::{Self, BridgeEscrow};
-    use sui::bridge_treasury::{Self, BridgeTreasury, token_id};
-    use sui::chain_ids;
     use sui::coin::{Self, Coin};
     use sui::event::emit;
     use sui::linked_table::{Self, LinkedTable};
-    use sui::object::{Self, UID};
+    use sui::object::UID;
     use sui::transfer;
     use sui::tx_context::{Self, TxContext};
     use sui::versioned::{Self, Versioned};
 
+    use bridge::chain_ids;
+    use bridge::committee::{Self, BridgeCommittee};
+    use bridge::escrow::{Self, BridgeEscrow};
+    use bridge::treasury::{Self, BridgeTreasury, token_id};
+
     #[test_only]
-    use sui::bridge_treasury::USDC;
+    use bridge::treasury::USDC;
     #[test_only]
     use sui::hex;
     #[test_only]
@@ -108,21 +109,21 @@ module sui::bridge {
     const CURRENT_MESSAGE_VERSION: u8 = 1;
 
     #[allow(unused_function)]
-    fun create(ctx: &mut TxContext) {
+    fun create(id: UID, ctx: &mut TxContext) {
         assert!(tx_context::sender(ctx) == @0x0, ENotSystemAddress);
         let bridge_inner = BridgeInner {
             version: CURRENT_VERSION,
             sequence_num: 0,
-            committee: bridge_committee::create_genesis_static_committee(),
-            escrow: bridge_escrow::create(ctx),
-            treasury: bridge_treasury::create(ctx),
+            committee: committee::create_genesis_static_committee(),
+            escrow: escrow::create(ctx),
+            treasury: treasury::create(ctx),
             pending_messages: linked_table::new<BridgeMessageKey, BridgeMessage>(ctx),
             approved_messages: linked_table::new<BridgeMessageKey, ApprovedBridgeMessage>(ctx),
             frozen: false,
             last_emergency_op_seq_num: 0
         };
         let bridge = Bridge{
-            id: object::bridge(),
+            id,
             inner : versioned::create(CURRENT_VERSION, bridge_inner, ctx)
         };
         transfer::share_object(bridge)
@@ -238,10 +239,10 @@ module sui::bridge {
             payload
         };
         // burn / escrow token
-        if (bridge_treasury::is_bridged_token<T>()) {
-            bridge_treasury::burn(&mut inner.treasury, token);
+        if (treasury::is_bridged_token<T>()) {
+            treasury::burn(&mut inner.treasury, token);
         }else {
-            bridge_escrow::escrow_token(&mut inner.escrow, token);
+            escrow::escrow_token(&mut inner.escrow, token);
         };
         // Store pending bridge request
         let key = BridgeMessageKey { source_chain: chain_ids::sui(), bridge_seq_num };
@@ -298,7 +299,7 @@ module sui::bridge {
         let inner = load_inner_mut(self);
         // varify signatures
         let raw_message = serialise_message(message);
-        bridge_committee::verify_signatures(&inner.committee, raw_message, signatures);
+        committee::verify_signatures(&inner.committee, raw_message, signatures);
         // retrieve pending message if source chain is Sui
         if (message.source_chain == chain_ids::sui()) {
             let key = BridgeMessageKey { source_chain: chain_ids::sui(), bridge_seq_num: message.seq_num };
@@ -349,12 +350,12 @@ module sui::bridge {
         // ensure this is a token bridge message
         assert!(message.message_type == TOKEN, EUnexpectedMessageType);
         // check token type
-        assert!(bridge_treasury::token_id<T>() == token_type, EUnexpectedTokenType);
+        assert!(treasury::token_id<T>() == token_type, EUnexpectedTokenType);
         // claim from escrow or treasury
-        let token = if (bridge_treasury::is_bridged_token<T>()) {
-            bridge_treasury::mint<T>(&mut inner.treasury, amount, ctx)
+        let token = if (treasury::is_bridged_token<T>()) {
+            treasury::mint<T>(&mut inner.treasury, amount, ctx)
         }else {
-            bridge_escrow::claim_token(&mut inner.escrow, amount, ctx)
+            escrow::claim_token(&mut inner.escrow, amount, ctx)
         };
         (token, owner)
     }
@@ -387,7 +388,7 @@ module sui::bridge {
         let inner = load_inner_mut(self);
         // check emergency ops seq number
         assert!(message.seq_num == inner.last_emergency_op_seq_num + 1, EUnexpectedSeqNum);
-        bridge_committee::verify_signatures(&inner.committee,serialise_message(message),signatures);
+        committee::verify_signatures(&inner.committee,serialise_message(message),signatures);
         let EmergencyOpPayload { op_type } = deserialise_emergency_op_payload(message.payload);
 
         if (op_type == FREEZE) {

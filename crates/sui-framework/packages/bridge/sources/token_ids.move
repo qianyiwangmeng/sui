@@ -1,7 +1,7 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-module sui::token_ids {
+module bridge::token_ids {
 
     // token ids
     const SUI: u8 = 0;

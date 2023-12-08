@@ -45,6 +45,7 @@ pub const AUTHENTICATOR_STATE_CREATE: Symbol = symbol!("create");
 pub const RANDOMNESS_MODULE_NAME: Symbol = symbol!("random");
 pub const RANDOMNESS_STATE_TYPE_NAME: Symbol = symbol!("Random");
 pub const RANDOMNESS_STATE_CREATE: Symbol = symbol!("create");
+pub const BRIDGE_ADDR_NAME: Symbol = symbol!("bridge");
 pub const BRIDGE_MODULE_NAME: Symbol = symbol!("bridge");
 pub const BRIDGE_TYPE_NAME: Symbol = symbol!("Bridge");
 pub const BRIDGE_CREATE: Symbol = symbol!("create");

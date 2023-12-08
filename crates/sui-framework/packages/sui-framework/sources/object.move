@@ -13,7 +13,6 @@ module sui::object {
     friend sui::transfer;
     friend sui::authenticator_state;
     friend sui::random;
-    friend sui::bridge;
 
     #[test_only]
     friend sui::test_scenario;
@@ -118,9 +117,10 @@ module sui::object {
         }
     }
 
+    #[allow(unused_function)]
     /// Create the `UID` for the singleton `Bridge` object.
     /// This should only be called once from `bridge`.
-    public(friend) fun bridge(): UID {
+    fun bridge(): UID {
         UID {
             id: ID { bytes: SUI_BRIDGE_ID }
         }

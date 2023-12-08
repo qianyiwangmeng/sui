@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Escrow package for locking unburnable tokens/objects
-module sui::bridge_escrow {
+module bridge::escrow {
     use std::type_name::{Self, TypeName};
 
     use sui::bag::{Self, Bag};
@@ -11,7 +11,7 @@ module sui::bridge_escrow {
     use sui::object::{Self, ID};
     use sui::tx_context::TxContext;
 
-    friend sui::bridge;
+    friend bridge::bridge;
 
     struct BridgeEscrow has store {
         escrow: Bag

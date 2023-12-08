@@ -1,7 +1,7 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-module sui::bridge_treasury {
+module bridge::treasury {
     use std::ascii::String;
     use std::option;
     use std::type_name;
@@ -9,11 +9,11 @@ module sui::bridge_treasury {
     use sui::coin::{Self, TreasuryCap, Coin};
     use sui::object_bag::{Self, ObjectBag};
     use sui::sui::SUI;
-    use sui::token_ids;
+    use bridge::token_ids;
     use sui::transfer;
     use sui::tx_context::TxContext;
 
-    friend sui::bridge;
+    friend bridge::bridge;
 
     const EUnsupportedTokenType: u64 = 0;
 
