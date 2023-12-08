@@ -169,7 +169,6 @@ fn build_packages_with_move_config(
         config,
         run_bytecode_verifier: true,
         print_diags_to_stderr: false,
-        lint: false,
     }
     .build(bridge_path)
     .unwrap();
