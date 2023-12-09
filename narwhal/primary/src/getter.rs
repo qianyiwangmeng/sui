@@ -20,7 +20,8 @@ use types::{
     GetHeadersRequest, GetHeadersResponse, HeaderKey, PrimaryToPrimaryClient, SignedHeader,
 };
 
-const GET_RETRY_INTERVAL: Duration = Duration::from_millis(200);
+const GET_DELAY: Duration = Duration::from_millis(1000);
+const GET_RETRY_INTERVAL: Duration = Duration::from_millis(1000);
 
 /// The HeaderGetter is responsible for getting specific headers that this primary is missing
 /// from peers.
@@ -83,12 +84,15 @@ impl HeaderGetter {
         }
     }
 
-    pub(crate) fn get_missing(&self, missing: Vec<HeaderKey>) {
+    pub(crate) fn get_missing(&self, missing: Vec<(HeaderKey, Instant)>) {
         let mut inflight = self.state.inflight.lock();
         let now = Instant::now();
         let missing = missing
             .into_iter()
-            .filter(|k| {
+            .filter(|(k, t)| {
+                if now - *t < GET_DELAY {
+                    return false;
+                }
                 if let Some(start) = inflight.last_get.get(k) {
                     if now - *start < GET_RETRY_INTERVAL {
                         return false;
@@ -105,7 +109,9 @@ impl HeaderGetter {
         spawn_monitored_task!(async move {
             let _scope = monitored_scope("Getter::task");
             // Send request to get headers.
-            let request = GetHeadersRequest { missing };
+            let request = GetHeadersRequest {
+                missing: missing.into_iter().map(|(k, _)| k).collect(),
+            };
             let Ok(response) = get_headers_helper(&state, request).await else {
                 return Ok::<(), DagError>(());
             };

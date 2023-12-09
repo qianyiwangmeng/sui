@@ -72,6 +72,7 @@ impl DagState {
             accepted_by_author,
             accepted_by_round: Default::default(),
             suspended: Default::default(),
+            missing: Default::default(),
             suspended_count,
             genesis,
             persisted,
@@ -279,14 +280,11 @@ impl DagState {
         inner.suspended.len()
     }
 
-    pub(crate) fn missing_headers(&self, limit: usize) -> Vec<HeaderKey> {
+    pub(crate) fn missing_headers(&self, limit: usize) -> Vec<(HeaderKey, Instant)> {
         let mut missing = Vec::new();
         let inner = self.inner.lock();
-        for (key, suspended) in &inner.suspended {
-            if suspended.signed_header.is_some() {
-                continue;
-            }
-            missing.push(*key);
+        for (k, t) in &inner.missing {
+            missing.push((*k, *t));
             if missing.len() >= limit {
                 break;
             }
@@ -302,12 +300,20 @@ impl DagState {
         signed_header: SignedHeader,
     ) -> DagResult<bool> {
         let header_key = signed_header.key();
+        inner
+            .metrics
+            .certificates_processed
+            .with_label_values(&["unknown"])
+            .inc();
+
         if inner.headers.contains_key(&header_key) {
             debug!(key=?header_key, "try_accept_internal: already accepted.");
+            inner.metrics.duplicate_certificates_processed.inc();
             return Ok(false);
         }
         if let Some(suspended_header) = inner.suspended.get(&header_key) {
             if suspended_header.signed_header.is_some() {
+                inner.metrics.duplicate_certificates_processed.inc();
                 return Ok(false);
             }
         }
@@ -377,19 +383,20 @@ impl DagState {
                 // Drop header when the suspended map becomes too large.
                 return Ok(false);
             }
+            let now = Instant::now();
             for ancestor in &missing {
-                inner
-                    .suspended
-                    .entry(*ancestor)
-                    .or_default()
-                    .dependents
-                    .insert(header_key);
+                let entry = inner.suspended.entry(*ancestor).or_default();
+                entry.dependents.insert(header_key);
+                if entry.signed_header.is_none() {
+                    inner.missing.insert(*ancestor, now);
+                }
             }
             let suspended_header = inner.suspended.entry(header_key).or_default();
             if suspended_header.signed_header.is_none() {
-                inner.suspended_count[header_key.author().0 as usize] += 1;
                 suspended_header.signed_header = Some(signed_header);
                 suspended_header.missing_ancestors = missing.into_iter().collect();
+                inner.suspended_count[header_key.author().0 as usize] += 1;
+                inner.missing.remove(&header_key);
             } else {
                 assert_eq!(
                     suspended_header.missing_ancestors,
@@ -457,6 +464,7 @@ struct Inner {
     // Maps keys of suspended headers to the header content and remaining missing ancestors.
     // TODO(narwhalceti): split into separate maps for suspended and missing headers.
     suspended: BTreeMap<HeaderKey, SuspendedHeader>,
+    missing: BTreeMap<HeaderKey, Instant>,
     // Number of suspended headers per author.
     suspended_count: Vec<usize>,
 
@@ -576,6 +584,8 @@ impl Inner {
                     }
                 }
             }
+
+            self.missing.remove(&header_key);
 
             // Try to accept dependents of the accepted header.
             let Some(suspended_header) = self.suspended.remove(&header_key) else {

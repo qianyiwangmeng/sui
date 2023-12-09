@@ -109,7 +109,7 @@ impl Core {
 
             let missing = self.dag_state.missing_headers(100);
             if !missing.is_empty() {
-                let lowest_missing_round = missing.first().unwrap().round();
+                let lowest_missing_round = missing.first().unwrap().0.round();
                 if self.dag_state.highest_accepted_round() + 100 < lowest_missing_round {
                     self.fetcher.try_start();
                 }
