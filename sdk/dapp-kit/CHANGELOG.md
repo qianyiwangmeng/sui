@@ -1,5 +1,14 @@
 # @mysten/dapp-kit
 
+## 0.10.3
+
+### Patch Changes
+
+- 165ad6b21d: Support both `id` and `name` as unique wallet identifiers.
+- d55db38647: Set a high z-index for the account dropdown so that it doesn't get hidden
+- Updated dependencies [165ad6b21d]
+  - @mysten/wallet-standard@0.9.0
+
 ## 0.10.2
 
 ### Patch Changes
