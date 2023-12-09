@@ -11432,6 +11432,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sui-common"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "mysten-metrics",
+ "sui-types",
+ "tokio",
+ "tracing",
+ "workspace-hack",
+]
+
+[[package]]
 name = "sui-config"
 version = "0.0.0"
 dependencies = [
@@ -11521,6 +11533,7 @@ dependencies = [
  "signature 1.6.4",
  "static_assertions",
  "sui-archival",
+ "sui-common",
  "sui-config",
  "sui-execution",
  "sui-framework",
