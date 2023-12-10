@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use config::{AuthorityIdentifier, Committee, WorkerCache};
 use mysten_metrics::{
@@ -81,20 +81,16 @@ impl Core {
 
     async fn run(&mut self) {
         loop {
-            let _scope = monitored_scope("CoreLoopIteration");
-
             let Some(header) = self.rx_verified_header.recv().await else {
                 info!("Core loop shutting down!");
                 return;
             };
 
+            let _scope = monitored_scope("CoreLoopIteration");
+
             debug!("Received verified header: {}", header.key());
             let mut headers = vec![header];
             while let Ok(header) = self.rx_verified_header.try_recv() {
-                self.metrics
-                    .highest_received_round
-                    .with_label_values(&["other"])
-                    .set(header.round() as i64);
                 debug!("Received verified header without wait: {}", header.key());
                 headers.push(header);
             }
@@ -109,8 +105,10 @@ impl Core {
 
             let missing = self.dag_state.missing_headers(100);
             if !missing.is_empty() {
-                let lowest_missing_round = missing.first().unwrap().0.round();
-                if self.dag_state.highest_accepted_round() + 100 < lowest_missing_round {
+                let (missing_key, missing_time) = missing.first().unwrap();
+                if missing_key.round() > self.dag_state.highest_accepted_round() + 100
+                    || missing_time.elapsed() > Duration::from_secs(10)
+                {
                     self.fetcher.try_start();
                 }
                 self.getter.get_missing(missing);

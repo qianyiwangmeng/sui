@@ -90,7 +90,7 @@ use types::{
     HeaderValidationResult, MetadataAPI, PreSubscribedBroadcastSender, PrimaryToPrimary,
     PrimaryToPrimaryServer, RandomnessRound, RequestVoteRequest, RequestVoteResponse, Round,
     SendCertificateRequest, SendCertificateResponse, SendHeaderRequest, SendHeaderResponse,
-    SendRandomnessPartialSignaturesRequest, SystemMessage, Vote, VoteInfoAPI,
+    SendRandomnessPartialSignaturesRequest, SignedHeader, SystemMessage, Vote, VoteInfoAPI,
     WorkerOthersBatchMessage, WorkerOwnBatchMessage, WorkerToPrimary, WorkerToPrimaryServer,
 };
 
@@ -687,6 +687,7 @@ impl Primary {
             protocol_config: protocol_config.clone(),
             worker_cache: worker_cache.clone(),
             verifier: verifier.clone(),
+            tx_verified_headers: tx_verified_headers.clone(),
             dag_state: dag_state.clone(),
             header_store: header_store.clone(),
             metrics: node_metrics.clone(),
@@ -964,8 +965,6 @@ impl Primary {
             authority.id(),
             network_signer.copy(),
             committee.clone(),
-            protocol_config.clone(),
-            worker_cache.clone(),
             dag_state.clone(),
             broadcaster,
             rx_headers_accepted,
@@ -1638,6 +1637,7 @@ struct PrimaryToPrimaryHandler {
     protocol_config: ProtocolConfig,
     worker_cache: WorkerCache,
     verifier: Arc<ArcSwapOption<Verifier>>,
+    tx_verified_headers: Sender<SignedHeader>,
     dag_state: Arc<DagState>,
     header_store: HeaderStore,
     metrics: Arc<PrimaryMetrics>,
@@ -1706,12 +1706,22 @@ impl PrimaryToPrimary for PrimaryToPrimaryHandler {
             ));
         };
 
-        verifier.verify(signed_header).await.map_err(|e| {
+        verifier.verify(&signed_header).await.map_err(|e| {
             anemo::rpc::Status::new_with_message(
                 StatusCode::BadRequest,
                 format!("Failed to verify header: {e}"),
             )
         })?;
+
+        self.tx_verified_headers
+            .send(signed_header)
+            .await
+            .map_err(|_| {
+                anemo::rpc::Status::new_with_message(
+                    StatusCode::InternalServerError,
+                    "Shutting down",
+                )
+            })?;
 
         Ok(anemo::Response::new(SendHeaderResponse {
             result: HeaderValidationResult::Ok,

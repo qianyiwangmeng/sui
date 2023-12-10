@@ -189,7 +189,7 @@ async fn run_fetch_task(
 
     let num_fetched = response.headers.len() as u64;
     // Process headers.
-    process_headers_helper(protocol_config, response, &state).await?;
+    process_headers_helper(&state, response).await?;
     state
         .metrics
         .certificate_fetcher_num_certificates_processed
@@ -284,15 +284,21 @@ async fn fetch_headers_helper(
 
 #[instrument(level = "debug", skip_all)]
 async fn process_headers_helper(
-    _protocol_config: &ProtocolConfig,
-    response: FetchHeadersResponse,
     state: &HeaderFetcherState,
+    response: FetchHeadersResponse,
 ) -> DagResult<()> {
     trace!("Start sending fetched headers to processing");
 
     let _scope = monitored_scope("Fetcher::verify");
-    for header in response.headers {
+    for header in &response.headers {
         state.verifier.verify(header).await?;
+    }
+    for header in response.headers {
+        state
+            .tx_verified_headers
+            .send(header)
+            .await
+            .map_err(|_| DagError::ShuttingDown)?;
     }
 
     Ok(())

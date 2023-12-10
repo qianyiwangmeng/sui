@@ -99,6 +99,10 @@ impl DagState {
     pub(crate) fn try_accept(&self, signed_headers: Vec<SignedHeader>) -> DagResult<usize> {
         let mut num_accepted = 0;
         let mut inner = self.inner.lock();
+        inner
+            .metrics
+            .certificates_received
+            .inc_by(signed_headers.len() as u64);
         for header in signed_headers {
             match self.try_accept_internal(&mut inner, header) {
                 Ok(accepted) => {
@@ -300,23 +304,6 @@ impl DagState {
         signed_header: SignedHeader,
     ) -> DagResult<bool> {
         let header_key = signed_header.key();
-        inner
-            .metrics
-            .certificates_processed
-            .with_label_values(&["unknown"])
-            .inc();
-
-        if inner.headers.contains_key(&header_key) {
-            debug!(key=?header_key, "try_accept_internal: already accepted.");
-            inner.metrics.duplicate_certificates_processed.inc();
-            return Ok(false);
-        }
-        if let Some(suspended_header) = inner.suspended.get(&header_key) {
-            if suspended_header.signed_header.is_some() {
-                inner.metrics.duplicate_certificates_processed.inc();
-                return Ok(false);
-            }
-        }
 
         inner.highest_received_round =
             std::cmp::max(inner.highest_received_round, header_key.round());
@@ -325,6 +312,35 @@ impl DagState {
             .highest_received_round
             .with_label_values(&["unknown"])
             .set(inner.highest_received_round as i64);
+
+        if inner.headers.contains_key(&header_key) {
+            debug!(key=?header_key, "try_accept_internal: already accepted.");
+            inner
+                .metrics
+                .duplicate_certificates_processed
+                .with_label_values(&["accepted"])
+                .inc();
+            return Ok(false);
+        }
+        if let Some(suspended_header) = inner.suspended.get(&header_key) {
+            if suspended_header.signed_header.is_some() {
+                inner
+                    .metrics
+                    .duplicate_certificates_processed
+                    .with_label_values(&["suspended"])
+                    .inc();
+                return Ok(false);
+            }
+        }
+        if header_key.round() > inner.highest_accepted_round() + 100 {
+            inner
+                .metrics
+                .certificates_dropped
+                .with_label_values(&["too_new"])
+                .inc();
+            // Drop header when the suspended map becomes too large.
+            return Ok(false);
+        }
 
         let mut missing = vec![];
         let mut to_check = vec![];
@@ -377,26 +393,20 @@ impl DagState {
 
         if !missing.is_empty() {
             debug!(key=?header_key, "try_accept_internal: suspended");
-            if inner.suspended.len() > 10000
-                && header_key.round() > inner.highest_accepted_round() + 100
-            {
-                // Drop header when the suspended map becomes too large.
-                return Ok(false);
-            }
             let now = Instant::now();
             for ancestor in &missing {
                 let entry = inner.suspended.entry(*ancestor).or_default();
-                entry.dependents.insert(header_key);
-                if entry.signed_header.is_none() {
+                if entry.signed_header.is_none() && entry.dependents.is_empty() {
                     inner.missing.insert(*ancestor, now);
                 }
+                entry.dependents.insert(header_key);
             }
+            inner.missing.remove(&header_key);
             let suspended_header = inner.suspended.entry(header_key).or_default();
             if suspended_header.signed_header.is_none() {
                 suspended_header.signed_header = Some(signed_header);
                 suspended_header.missing_ancestors = missing.into_iter().collect();
                 inner.suspended_count[header_key.author().0 as usize] += 1;
-                inner.missing.remove(&header_key);
             } else {
                 assert_eq!(
                     suspended_header.missing_ancestors,
@@ -415,14 +425,6 @@ impl DagState {
 
         debug!(key=?header_key, "try_accept_internal: accepting");
         inner.accept_internal(signed_header);
-
-        inner.highest_accepted_round =
-            std::cmp::max(inner.highest_accepted_round, header_key.round());
-        inner
-            .metrics
-            .highest_processed_round
-            .with_label_values(&["unknown"])
-            .set(inner.highest_accepted_round as i64);
 
         inner
             .metrics
@@ -557,6 +559,17 @@ impl Inner {
             let header_key = header.key();
             debug!(key=?header_key, "try_accept_internal: accepted");
             let author_index = header_key.author().0 as usize;
+
+            self.highest_accepted_round =
+                std::cmp::max(self.highest_accepted_round, header_key.round());
+            self.metrics
+                .highest_processed_round
+                .with_label_values(&["unknown"])
+                .set(self.highest_accepted_round as i64);
+            self.metrics
+                .certificates_processed
+                .with_label_values(&["unknown"])
+                .inc();
 
             // GC is done in flush().
             self.headers.insert(header_key, header);

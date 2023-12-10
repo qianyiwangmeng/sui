@@ -168,8 +168,15 @@ async fn process_headers_helper(
     trace!("Start sending headers to processing");
 
     let _scope = monitored_scope("Fetcher::verify");
-    for header in response.headers {
+    for header in &response.headers {
         state.verifier.verify(header).await?;
+    }
+    for header in response.headers {
+        state
+            .tx_verified_headers
+            .send(header)
+            .await
+            .map_err(|_| DagError::ShuttingDown)?;
     }
 
     Ok(())

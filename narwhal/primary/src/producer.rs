@@ -2,7 +2,7 @@ use std::{collections::VecDeque, mem::swap, sync::Arc, time::Duration};
 
 use config::{AuthorityIdentifier, Committee, WorkerCache};
 use crypto::{traits::Signer, NetworkKeyPair};
-use mysten_metrics::{metered_channel::Receiver, spawn_logged_monitored_task};
+use mysten_metrics::{metered_channel::Receiver, monitored_scope, spawn_logged_monitored_task};
 use sui_protocol_config::ProtocolConfig;
 use tokio::{
     sync::watch,
@@ -28,9 +28,6 @@ pub struct Producer {
     signer: NetworkKeyPair,
     // Committee of the current epoch.
     committee: Committee,
-    protocol_config: ProtocolConfig,
-    // The worker information cache.
-    worker_cache: WorkerCache,
     // Stores headers accepted by this primary.
     dag_state: Arc<DagState>,
     // Broadcasts headers to peers.
@@ -48,8 +45,6 @@ impl Producer {
         authority_id: AuthorityIdentifier,
         signer: NetworkKeyPair,
         committee: Committee,
-        protocol_config: ProtocolConfig,
-        worker_cache: WorkerCache,
         dag_state: Arc<DagState>,
         broadcaster: Broadcaster,
         rx_headers_accepted: watch::Receiver<()>,
@@ -60,8 +55,6 @@ impl Producer {
             authority_id,
             signer,
             committee,
-            protocol_config,
-            worker_cache,
             dag_state,
             broadcaster,
             rx_headers_accepted,
@@ -111,6 +104,8 @@ impl Producer {
                     // Continue to trigger propose.
                 }
             }
+
+            let _scope = monitored_scope("ProducerLoopIteration");
 
             let propose_result = self.dag_state.try_propose();
             propose_timer

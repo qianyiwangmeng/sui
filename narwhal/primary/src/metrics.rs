@@ -309,14 +309,18 @@ pub struct PrimaryMetrics {
     pub certificate_created_round: IntGauge,
     /// count number of certificates that the node created
     pub certificates_created: IntCounter,
+    /// count number of certificates that the node received
+    pub certificates_received: IntCounter,
     /// count number of certificates that the node processed (others + own)
     pub certificates_processed: IntCounterVec,
     /// count number of certificates that the node suspended their processing
     pub certificates_suspended: IntCounterVec,
+    /// count number of certificates that the node received
+    pub certificates_dropped: IntCounterVec,
     /// number of certificates that are currently suspended.
     pub certificates_currently_suspended: IntGauge,
     /// count number of duplicate certificates that the node processed (others + own)
-    pub duplicate_certificates_processed: IntCounter,
+    pub duplicate_certificates_processed: IntCounterVec,
     /// The current Narwhal round in proposer
     pub current_round: IntGauge,
     /// Latency distribution for generating proposals
@@ -413,6 +417,12 @@ impl PrimaryMetrics {
                 registry
             )
             .unwrap(),
+            certificates_received: register_int_counter_with_registry!(
+                "certificates_received",
+                "Number of certificates that node received",
+                registry
+            )
+            .unwrap(),
             certificates_processed: register_int_counter_vec_with_registry!(
                 "certificates_processed",
                 "Number of certificates that node processed (others + own)",
@@ -427,15 +437,23 @@ impl PrimaryMetrics {
                 registry
             )
             .unwrap(),
+            certificates_dropped: register_int_counter_vec_with_registry!(
+                "certificates_dropped",
+                "Number of certificates that node dropped",
+                &["reason"],
+                registry
+            )
+            .unwrap(),
             certificates_currently_suspended: register_int_gauge_with_registry!(
                 "certificates_currently_suspended",
                 "Number of certificates that are suspended in memory",
                 registry
             )
             .unwrap(),
-            duplicate_certificates_processed: register_int_counter_with_registry!(
+            duplicate_certificates_processed: register_int_counter_vec_with_registry!(
                 "duplicate_certificates_processed",
                 "Number of certificates that node processed (others + own)",
+                &["reason"],
                 registry
             )
             .unwrap(),

@@ -60,7 +60,7 @@ impl Verifier {
     }
 
     // TODO(narwhalceti): move sending header to tx_verified_headers out of the function.
-    pub async fn verify(&self, signed_header: SignedHeader) -> DagResult<()> {
+    pub async fn verify(&self, signed_header: &SignedHeader) -> DagResult<()> {
         // Run basic header validations.
         signed_header
             .header()
@@ -93,11 +93,6 @@ impl Verifier {
 
         // Verify existence and validity of batches.
         self.sync_batches_internal(signed_header.header()).await?;
-
-        self.tx_verified_headers
-            .send(signed_header)
-            .await
-            .map_err(|_| DagError::ShuttingDown)?;
 
         Ok(())
     }
